@@ -17,6 +17,7 @@
 #define __LEGION_GARBAGE_COLLECTION_H__
 
 #include "legion/api/types.h"
+#include "legion/kernel/metatask.h"
 #include "legion/utilities/bitmask.h"
 
 namespace Legion {
@@ -265,6 +266,7 @@ namespace Legion {
       friend class DistributedDowngradeSuccess;
       friend class DistributedDowngradeUpdate;
       friend class DistributedDowngradeRestart;
+      friend class DistributedRegistrationResponse;
 #ifndef LEGION_DEBUG_GC
     private:
       void add_gc_reference(int cnt);
@@ -300,7 +302,14 @@ namespace Legion {
       inline bool is_owner(void) const { return (owner_space == local_space); }
       inline bool is_registered(void) const { return registered_with_runtime; }
       bool has_remote_instance(AddressSpaceID remote_space) const;
-      void update_remote_instances(AddressSpaceID remote_space);
+      // Set 'registration' when recording a remote instance in response to
+      // a remote registration message (as opposed to recording an instance
+      // that we are creating ourselves by sending a reference or handle to
+      // the target); registrations nudge the downgrade owner so any round
+      // that already fanned out re-runs to include the new instance
+      void update_remote_instances(
+          AddressSpaceID remote_inst, bool registration = false,
+          LamportClock* registration_clock = nullptr);
     public:
       inline bool has_remote_instances(void) const;
       template<typename FUNCTOR>
@@ -320,18 +329,37 @@ namespace Legion {
           AutoLock& gc, State to_check, LamportClock lamport_clock);
       virtual void accumulate_local_references(void);
       virtual void record_pending_downgrade(void);
+      // Whether there are packed references at the current level that
+      // have not been matched by unpacks (level-aware: valid objects at
+      // the valid level check their valid-level counts as well)
+      virtual bool has_packed_references(void) const;
+      // Record that a packed reference is stamped with the valid level
+      // because this node is at the valid level; counts the send at the
+      // valid level as well so a valid-level downgrade round cannot
+      // commit while the (potentially replica-creating) reference is in
+      // flight; returns true when the stamp applies
+      virtual bool record_valid_stamp(unsigned cnt);
+      // Apply the valid-level stamp of an unpacked reference: count the
+      // receipt at the valid level and enforce that replicas are born in
+      // the creator's known state
+      virtual void apply_valid_stamp(unsigned cnt);
       void check_for_downgrade(
-          AddressSpaceID downgrade_owner, LamportClock lamport_clock);
+          AutoLock& gc, AddressSpaceID round_owner, LamportClock lamport_clock);
+      // Fold the owner space's (possibly F16-bumped) clock from our
+      // registration acknowledgement; must happen before the
+      // registration event triggers
+      bool process_registration_response(LamportClock lamport_clock);
       void check_for_downgrade_restart(
-          AddressSpaceID new_owner, LamportClock lamport_clock);
+          AutoLock& gc, AddressSpaceID candidate, uint64_t candidate_version,
+          LamportClock lamport_clock);
       void process_downgrade_request(
-          AddressSpaceID owner, State to_check, LamportClock lamport_clock);
+          AddressSpaceID source, AddressSpaceID owner, uint64_t owner_version,
+          State to_check, LamportClock lamport_clock);
       bool process_downgrade_response(
           AddressSpaceID notready, uint64_t total_sent, uint64_t total_received,
           LamportClock lamport_clock);
       void send_downgrade_notifications(State to_downgrade);
       void process_downgrade_success(State old_state);
-      AddressSpaceID get_downgrade_target(AddressSpaceID owner) const;
       void finalize_remote_iterators(void);
     public:
       const DistributedID did;
@@ -360,11 +388,9 @@ namespace Legion {
     protected:
       // Track all the remote instances (relative to ourselves) we know about
       NodeSet<LONG_LIFETIME> remote_instances;
-      // Event for recording when we've registered with the owner node
-      // This has to have triggered before we pack any kind of references
-      // or the downgrade protocol can fail by getting a spurious
-      // matching sum of the packed and unpacked references
-      RtEvent remote_registered;
+      // An event that needs to be triggered once the remote registration is
+      // done
+      RtUserEvent pending_remote_registered;
       // Track if we're iterating over the remote instances
       std::atomic<unsigned> remote_iterators = 0;
       // Valid while an update_remote_instances is waiting for the iterators to
@@ -372,7 +398,27 @@ namespace Legion {
       // dangle; concurrent waiters share it by value.
       RtUserEvent remote_iteration_waiter;
     protected:
-      AddressSpaceID downgrade_owner, notready_owner;
+      // Which node we currently believe is responsible for initiating
+      // downgrade rounds, tagged with a version that increments on every
+      // ownership transfer; ownership is only ever adopted from strictly
+      // newer versions so stale transfers and restarts cannot resurrect
+      // a previous owner (or a dead object)
+      AddressSpaceID downgrade_owner;
+      uint64_t downgrade_owner_version = 0;
+      // The owner of the downgrade round we are currently participating
+      // in (valid while remaining_responses > 0); this can differ from
+      // downgrade_owner when we decline to adopt a stale round's owner
+      // but still vote in its round
+      AddressSpaceID round_owner;
+      // The node that sent us the current round's request, to which our
+      // response is owed. Responses must return to the REQUESTER (which
+      // counted us in its remaining_responses), never to a recomputed
+      // topological target: for a non-member instance of a collective
+      // mapping, find_nearest routes by address-space ID and generally
+      // picks a different member than the sender, silently corrupting
+      // that member's aggregation (the 2026-08-24 fuzzer failures).
+      AddressSpaceID round_parent;
+      AddressSpaceID notready_owner;
       uint64_t sent_global_references, received_global_references;
       uint64_t total_sent_references, total_received_references;
       LamportClock downgrade_lamport_clock = 0;
@@ -380,11 +426,20 @@ namespace Legion {
       unsigned remaining_responses;
       // Whether we need to bump the downgrade lamport clock on a pack
       bool bump_downgrade_lamport_clock = false;
-      // Set when an unpack_*_ref happens while we hold references (so the
-      // downgrade owner can't act on the notification immediately anyway).
-      // Drained when the relevant reference count returns to zero so the
-      // owner gets one consolidated DowngradeRestart instead of one per unpack.
+      // Serves two related purposes, both of which veto the next ready
+      // vote at this node (checked at every vote: leaf, relay, and root):
+      // (1) an unpack_*_ref happened while we held references or while a
+      // downgrade round was in flight, so the downgrade owner could not
+      // be notified immediately; drained into one consolidated
+      // DowngradeRestart when the relevant reference count returns to
+      // zero outside of a round
+      // (2) a DowngradeRestart arrived that we could neither act on
+      // (mid-round, or not the downgrade owner) nor forward to a
+      // provably-fresher owner; parked here so the restart cannot be
+      // lost while its cause is still unresolved
       bool pending_downgrade_restart = false;
+      // Record whether we've observed our remote registration response
+      bool remote_registered = true;
     protected:
       mutable bool registered_with_runtime;
     };
@@ -448,6 +503,9 @@ namespace Legion {
           AutoLock& gc, State to_check, LamportClock lamport_clock) override;
       virtual void accumulate_local_references(void) override;
       virtual void record_pending_downgrade(void) override;
+      virtual bool has_packed_references(void) const override;
+      virtual bool record_valid_stamp(unsigned cnt) override;
+      virtual void apply_valid_stamp(unsigned cnt) override;
     public:
       // Notify that this is no longer globally valid
       virtual void notify_invalid(void) = 0;

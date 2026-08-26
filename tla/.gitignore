@@ -1,0 +1,5 @@
+# TLC binary: fetch tla2tools.jar (v2.19) from
+# https://github.com/tlaplus/tlaplus/releases
+tla2tools.jar
+# fuzzer/slurm crash logs (findings summarized in FINDINGS.md)
+slurm-*.out

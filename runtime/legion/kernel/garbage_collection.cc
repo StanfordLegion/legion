@@ -147,7 +147,8 @@ namespace Legion {
       : did(id), owner_space(runtime->determine_owner(did)),
         local_space(runtime->address_space), collective_mapping(mapping),
         current_state(initial_state), gc_references(0), resource_references(0),
-        downgrade_owner(owner_space), notready_owner(owner_space),
+        downgrade_owner(owner_space), round_owner(owner_space),
+        round_parent(owner_space), notready_owner(owner_space),
         sent_global_references(0), received_global_references(0),
         total_sent_references(0), total_received_references(0),
         remaining_responses(0), registered_with_runtime(false)
@@ -389,14 +390,19 @@ namespace Legion {
           }
           else  // Otherwise pack a reference to send back
           {
-            if (bump_downgrade_lamport_clock &&
-                (current_state != VALID_REF_STATE) &&
-                (current_state != PENDING_GLOBAL_REF_STATE))
+            // Under stamp-counting every counted pack is an event at the
+            // stamped level, so the clock bump applies unconditionally
+            if (bump_downgrade_lamport_clock)
             {
               downgrade_lamport_clock++;
               bump_downgrade_lamport_clock = false;
             }
-            lamport_clock = downgrade_lamport_clock;
+            // Encode the valid-level stamp in the low bit of the clock
+            // token so it travels with every packed global reference
+            // (see pack_global_ref for the encoding rationale)
+            lamport_clock = downgrade_lamport_clock << 1;
+            if (record_valid_stamp(1 /*count*/))
+              lamport_clock |= 1;
             sent_global_references++;
           }
           return true;
@@ -680,7 +686,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DistributedCollectable::update_remote_instances(
-        AddressSpaceID remote_inst)
+        AddressSpaceID remote_inst, bool registration,
+        LamportClock* registration_clock)
     //--------------------------------------------------------------------------
     {
       // Should not be recording things we already know about
@@ -714,19 +721,20 @@ namespace Legion {
       // deletion because there was a packed reference, but we didn't know
       // where to send it to yet
       if (is_owner() && remote_instances.empty() &&
-          (collective_mapping == nullptr) &&
-          (sent_global_references != received_global_references))
+          (collective_mapping == nullptr) && has_packed_references())
       {
         legion_assert(downgrade_owner == local_space);
         legion_assert(
             (current_state == VALID_REF_STATE) ||
             (current_state == GLOBAL_REF_STATE));
+        downgrade_owner = remote_inst;
+        downgrade_owner_version++;
         DistributedDowngradeUpdate rez;
         rez.serialize(did);
         rez.serialize(current_state);
+        rez.serialize(downgrade_owner_version);
         rez.serialize(downgrade_lamport_clock);
         rez.dispatch(remote_inst);
-        downgrade_owner = remote_inst;
       }
       else if (remaining_responses > 0)
       {
@@ -736,7 +744,50 @@ namespace Legion {
         // querying the new instance that has just been added.
         notready_owner = remote_inst;
       }
+      else if (registration)
+      {
+        // Registration nudge: a downgrade round that already completed
+        // (or an idle downgrade owner) has no other way to learn that a
+        // new instance now exists, so re-run the check. Without this a
+        // round at the next level can commit over an instance list that
+        // is missing the registrant (see the registration-gate finding
+        // in the TLA+ model). Note the nudge is only needed for actual
+        // registrations: instances we are creating ourselves send back
+        // their own notification when they unpack their first reference.
+        //
+        // F16: with our aggregation CLOSED, the mid-round poison above
+        // cannot protect a round rooted elsewhere in the collective tree
+        // whose responses do not pass through us, and the nudge restart
+        // below races that round's decision on the wire. Bump our clock
+        // past every round we have ready-voted in (accumulate folds the
+        // round's clock into ours at each ready vote): the registration
+        // response carries the bump to the registrant, whose future
+        // packed references propagate it, so any voter receiving one
+        // fails that round's causality check and votes not-ready. A
+        // round we voted NOT-ready in is beyond the bump's reach but is
+        // already doomed by our vote. See TLA+ finding F16.
+        downgrade_lamport_clock++;
+        remote_instances.add(remote_inst);
+        if (downgrade_owner == local_space)
+          check_for_downgrade_restart(
+              gc, local_space, downgrade_owner_version,
+              downgrade_lamport_clock);
+        else
+        {
+          DistributedDowngradeRestart rez;
+          rez.serialize(did);
+          rez.serialize(downgrade_owner);  // candidate: the owner itself
+          rez.serialize(downgrade_owner_version);
+          rez.serialize(downgrade_lamport_clock);
+          rez.dispatch(downgrade_owner);
+        }
+        if (registration_clock != nullptr)
+          *registration_clock = downgrade_lamport_clock;
+        return;
+      }
       remote_instances.add(remote_inst);
+      if (registration_clock != nullptr)
+        *registration_clock = downgrade_lamport_clock;
     }
 
     //--------------------------------------------------------------------------
@@ -757,15 +808,13 @@ namespace Legion {
       // take a lock to handle races with packed valid references
       legion_assert(!is_owner());
       legion_assert(registered_with_runtime);
-      legion_assert(!remote_registered.exists());
+      legion_assert(remote_registered);
       legion_assert(sent_global_references == 0);
-      const RtUserEvent registered_event = Runtime::create_rt_user_event();
-      remote_registered = registered_event;
+      remote_registered = false;
       DistributedRemoteRegistration rez;
       {
         RezCheck z(rez);
         rez.serialize(did);
-        rez.serialize(registered_event);
       }
       rez.dispatch(owner_space);
     }
@@ -778,12 +827,76 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
       DistributedCollectable* target =
           runtime->find_distributed_collectable(did);
-      target->update_remote_instances(source);
-      Runtime::trigger_event(done_event);
+      LamportClock registration_clock = 0;
+      target->update_remote_instances(
+          source, true /*registration*/, &registration_clock);
+      // Send the acknowledgement through a response message carrying our
+      // clock so an F16 bump reaches the registrant BEFORE its
+      // registration event triggers (its packs must carry the bump);
+      // the registrant triggers the event after folding the clock
+      DistributedRegistrationResponse rez;
+      {
+        RezCheck z2(rez);
+        rez.serialize(did);
+        rez.serialize(registration_clock);
+      }
+      rez.dispatch(source);
+    }
+
+    //--------------------------------------------------------------------------
+    bool DistributedCollectable::process_registration_response(
+        LamportClock lamport_clock)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+      legion_assert(!remote_registered);
+      downgrade_lamport_clock =
+          std::max(downgrade_lamport_clock, lamport_clock);
+      remote_registered = true;
+      if (pending_remote_registered.exists())
+      {
+        Runtime::trigger_event(pending_remote_registered);
+        pending_remote_registered = RtUserEvent::NO_RT_USER_EVENT;
+      }
+      if (pending_downgrade_restart)
+        return can_delete(gc);
+      else
+        return false;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void DistributedRegistrationResponse::handle(
+        Deserializer& derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      LamportClock lamport_clock;
+      derez.deserialize(lamport_clock);
+      // An unregistered replica cannot be deleted before this response
+      // arrives, so we can use a blocking find and assert the result.
+      // Deletion requires reaching LOCAL_REF_STATE, which requires
+      // performing the GLOBAL-level downgrade locally, and every path to
+      // that is closed while our registration is outstanding:
+      //  1. Voting ready in a GLOBAL-level round: the registration gate
+      //     in check_for_downgrade answers not-ready (or parks the
+      //     self-check) until remote_registered is set -- by this
+      //     handler.
+      //  2. Applying a downgrade success: successes only apply to a
+      //     replica that voted in the round, and voting is gate-blocked
+      //     per (1).
+      //  3. The catch-up in process_downgrade_request: a commit proof
+      //     only applies the VALID-level downgrade, reaching
+      //     GLOBAL_REF_STATE at most, never LOCAL_REF_STATE.
+      // (Registration with the runtime's DID table happened before
+      // send_remote_registration, so the find cannot block either.)
+      DistributedCollectable* dc = runtime->find_distributed_collectable(did);
+      legion_assert(dc != nullptr);
+      if (dc->process_registration_response(lamport_clock))
+        delete dc;
     }
 
     //--------------------------------------------------------------------------
@@ -828,26 +941,45 @@ namespace Legion {
       // with the owner node otherwise we need to wait for that
       // registration to succeed before we can pack in order to avoid
       // spurious successful downgrades
-      if (remote_registered.exists())
+      if (!remote_registered)
       {
-        const RtEvent wait_on = remote_registered;
+        if (!pending_remote_registered.exists())
+          pending_remote_registered = Runtime::create_rt_user_event();
+        const RtEvent wait_on = pending_remote_registered;
         gc.release();
         wait_on.wait();
         gc.reacquire();
-        remote_registered = RtEvent::NO_RT_EVENT;
         // Should still be global state
         legion_assert(
             (current_state == VALID_REF_STATE) ||
             (current_state == GLOBAL_REF_STATE) ||
             (current_state == PENDING_GLOBAL_REF_STATE));
       }
-      if (bump_downgrade_lamport_clock && (current_state != VALID_REF_STATE) &&
-          (current_state != PENDING_GLOBAL_REF_STATE))
+      // Under stamp-counting every counted pack is an event at the stamped
+      // level, so the clock bump applies unconditionally: a global reference
+      // packed from a valid-level node carries a valid-level count and can
+      // otherwise mask an in-flight valid reference from the round tallies
+      if (bump_downgrade_lamport_clock)
       {
         downgrade_lamport_clock++;
         bump_downgrade_lamport_clock = false;
       }
-      lamport_clock = downgrade_lamport_clock;
+      // Encode the valid-level stamp in the low bit of the clock token so
+      // it travels with every packed global reference: replicas are created
+      // in the creator's known state and the send is counted at the stamped
+      // level too, so a valid-level round cannot commit while a global
+      // reference packed at the valid level is still in flight.
+      // The shift caps the clock at 2^63-1 on the wire, which is safe: the
+      // clock is per-object and only advances with downgrade rounds (each
+      // at least one network round trip for this object), so it cannot
+      // approach 2^63 in any object's lifetime. We use the low bit rather
+      // than the high bit so the encoding transforms EVERY token (not just
+      // valid-stamped ones): any path that forgets to decode is then wrong
+      // for every message and fails loudly in the causality checks instead
+      // of lurking until the first valid-stamped reference.
+      lamport_clock = downgrade_lamport_clock << 1;
+      if (record_valid_stamp(cnt))
+        lamport_clock |= 1;
       sent_global_references += cnt;
 #ifdef LEGION_DEBUG
       gc.release();
@@ -872,19 +1004,28 @@ namespace Legion {
         LamportClock lamport_clock, unsigned cnt)
     //--------------------------------------------------------------------------
     {
+      // Decode the valid-level stamp from the low bit of the clock token
+      const bool valid_stamp = ((lamport_clock & 1) != 0);
+      lamport_clock >>= 1;
       AutoLock gc(gc_lock);
       legion_assert(is_global<false /*need lock*/>());
       received_global_references += cnt;
+      if (valid_stamp)
+        apply_valid_stamp(cnt);
       downgrade_lamport_clock =
           std::max(downgrade_lamport_clock, lamport_clock);
-      // No need to send any notifications if a downgrade is in process
+      // No need to send any notifications if a downgrade is in process,
+      // but we do need to record the veto so the in-flight round cannot
+      // commit a decision that this unpacked reference invalidates
       if (remaining_responses == 0)
       {
         if (downgrade_owner == local_space)
         {
           // We're the downgrade owner so check to see if we can resume
           // doing collections or we can wait for the next removal
-          check_for_downgrade_restart(local_space, downgrade_lamport_clock);
+          check_for_downgrade_restart(
+              gc, local_space, downgrade_owner_version,
+              downgrade_lamport_clock);
         }
         else if (
             (current_state == PENDING_LOCAL_REF_STATE) || (gc_references == 0))
@@ -900,6 +1041,8 @@ namespace Legion {
           // to notify the downgrade owner about the unpacked references
           DistributedDowngradeRestart rez;
           rez.serialize(did);
+          rez.serialize(local_space);  // propose ourselves as the candidate
+          rez.serialize(downgrade_owner_version);
           rez.serialize(downgrade_lamport_clock);
           rez.dispatch(downgrade_owner);
         }
@@ -914,6 +1057,15 @@ namespace Legion {
           pending_downgrade_restart = true;
         }
       }
+      else
+      {
+        // A downgrade round is in flight through this node (we are the
+        // round owner or an aggregating relay). The unpacked reference
+        // must veto the round's decision: the counts we already reported
+        // could otherwise cancel against this receipt and hide a live
+        // reference from the tallies
+        pending_downgrade_restart = true;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -921,25 +1073,59 @@ namespace Legion {
         Deserializer& derez)
     //--------------------------------------------------------------------------
     {
+      // Note this returns the encoded clock token (clock plus the
+      // valid-level stamp in the low bit); callers must treat it as
+      // opaque and only feed it back to unpack_global_ref
       LamportClock lamport_clock;
       derez.deserialize(lamport_clock);
       return lamport_clock;
     }
 
     //--------------------------------------------------------------------------
+    bool DistributedCollectable::has_packed_references(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (sent_global_references != received_global_references);
+    }
+
+    //--------------------------------------------------------------------------
+    bool DistributedCollectable::record_valid_stamp(unsigned cnt)
+    //--------------------------------------------------------------------------
+    {
+      // Base distributed collectables have no valid level so their
+      // packed references are never stamped with it
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void DistributedCollectable::apply_valid_stamp(unsigned cnt)
+    //--------------------------------------------------------------------------
+    {
+      // A valid-level stamp can only be produced by an object with a
+      // valid level, and both ends of a packed reference are the same
+      // kind of object, so this should never be called on the base class
+      std::abort();
+    }
+
+    //--------------------------------------------------------------------------
     bool DistributedCollectable::can_delete(AutoLock& gc)
     //--------------------------------------------------------------------------
     {
-      if (pending_downgrade_restart)
+      if (pending_downgrade_restart && (remaining_responses == 0))
       {
-        // Clear unconditionally so the flag doesn't outlive
-        // a release cycle, even when the conditions to actually send aren't
-        // met (e.g., we became the downgrade owner via DowngradeUpdate).
+        // Drain the deferred restart notification now that our references
+        // have returned to zero. If a downgrade round is still in flight
+        // through this node we must NOT clear the flag: it is the veto
+        // that keeps the in-flight round from committing a decision that
+        // the deferred traffic invalidates; the round's decision path
+        // clears it.
         pending_downgrade_restart = false;
-        if ((downgrade_owner != local_space) && (remaining_responses == 0))
+        if (downgrade_owner != local_space)
         {
           DistributedDowngradeRestart rez;
           rez.serialize(did);
+          rez.serialize(local_space);  // propose ourselves as the candidate
+          rez.serialize(downgrade_owner_version);
           rez.serialize(downgrade_lamport_clock);
           rez.dispatch(downgrade_owner);
         }
@@ -961,14 +1147,15 @@ namespace Legion {
             if (!is_owner() || !remote_instances.empty() ||
                 ((collective_mapping != nullptr) &&
                  (collective_mapping->size() > 1)) ||
-                (sent_global_references != received_global_references))
+                has_packed_references())
             {
               // If we're already checking for a downgrade but are awaiting
               // responses, then there is nothing to do
               if (remaining_responses > 0)
                 return false;
               // Send messages to see if we can perform the deletion
-              check_for_downgrade(downgrade_owner, downgrade_lamport_clock + 1);
+              check_for_downgrade(
+                  gc, downgrade_owner, downgrade_lamport_clock + 1);
               return false;
             }
             else
@@ -1102,13 +1289,67 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DistributedCollectable::check_for_downgrade(
-        AddressSpaceID owner, LamportClock lamport_clock)
+        AutoLock& gc, AddressSpaceID owner, LamportClock lamport_clock)
     //--------------------------------------------------------------------------
     {
       legion_assert(remaining_responses == 0);
-      // Update the downgrade owner
-      downgrade_owner = owner;
-      if (can_downgrade() && (downgrade_lamport_clock <= lamport_clock))
+      // Registration gate: we must never vote in (or start) a downgrade
+      // round until our registration with the owner space has been
+      // acknowledged. Tallies only protect within a level: an instance
+      // whose counts were retired by a committed level is invisible to
+      // the next level's arithmetic, so the owner space's instance list
+      // is the only thing carrying our existence across levels and it is
+      // only complete once our registration has been processed.
+      // The gate is an ENABLING CONDITION, exactly as in the TLA+ model:
+      // it must NEVER block. This path is reached from
+      // remove_*_reference calls where the caller has just surrendered
+      // its only reference to this object, so releasing the lock to wait
+      // here is a use-after-free window (finding F15) -- and F12/F14
+      // were both races through the same window. If our registration has
+      // not been acknowledged yet we are simply not ready: answer
+      // not-ready when asked to vote, or defer the self-check until the
+      // acknowledgement arrives (the model's RecvRegResp continuation).
+      if (!remote_registered)
+      {
+        if (owner != local_space)
+        {
+          // Somebody asked us to vote: answer not-ready so the round
+          // owner retries. Note we do NOT clear
+          // pending_downgrade_restart here: it may be the veto
+          // protecting a later round's decision. If responsibility for
+          // this object later transfers to us, the self-check path
+          // below defers and picks things up once we are registered.
+          const AddressSpaceID target = round_parent;
+          DistributedDowngradeResponse rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(local_space);
+            rez.serialize<uint64_t>(0);  // sent global references
+            rez.serialize<uint64_t>(0);  // received global references
+            rez.serialize(downgrade_lamport_clock);
+          }
+          if (!pending_remote_registered.exists())
+            pending_remote_registered = Runtime::create_rt_user_event();
+          // As a performance optimization delay our response until
+          // the registration is done so we don't poll unnecessarily
+          rez.dispatch(target, pending_remote_registered);
+        }
+        else
+          // We are checking ourselves as the downgrade owner: re-run
+          // the check when the registration acknowledgement arrives
+          pending_downgrade_restart = true;
+        return;
+      }
+      // Record the owner of the round we are participating in; note we
+      // do NOT adopt it as the downgrade owner here: adoption is gated
+      // on the ownership version by our callers
+      round_owner = owner;
+      // A parked restart or deferred unpack notification vetoes any
+      // ready vote we would cast in somebody else's round; the owner
+      // itself may still start a round (its decision checks the veto)
+      if (can_downgrade() && (downgrade_lamport_clock <= lamport_clock) &&
+          ((owner == local_space) || !pending_downgrade_restart))
       {
         pending_downgrade_lamport_clock = lamport_clock;
         // Don't need to bump this new lamport clock until we do the accumulate
@@ -1140,6 +1381,7 @@ namespace Legion {
                 else
                   rez.serialize(current_state);
                 rez.serialize(owner);
+                rez.serialize(downgrade_owner_version);
                 rez.serialize(pending_downgrade_lamport_clock);
               }
               for (const AddressSpaceID& child_id : children)
@@ -1161,6 +1403,7 @@ namespace Legion {
               else
                 rez.serialize(current_state);
               rez.serialize(owner);
+              rez.serialize(downgrade_owner_version);
               rez.serialize(pending_downgrade_lamport_clock);
             }
             struct {
@@ -1176,7 +1419,7 @@ namespace Legion {
               unsigned skipped;
             } downgrade_functor;
             downgrade_functor.rez = &rez;
-            downgrade_functor.owner = downgrade_owner;
+            downgrade_functor.owner = owner;
             downgrade_functor.skipped = 0;
             remote_instances.map(downgrade_functor);
             remaining_responses +=
@@ -1197,6 +1440,7 @@ namespace Legion {
             rez.serialize(did);
             rez.serialize(current_state);
             rez.serialize(owner);
+            rez.serialize(downgrade_owner_version);
             rez.serialize(pending_downgrade_lamport_clock);
           }
           rez.dispatch(owner_space);
@@ -1213,7 +1457,7 @@ namespace Legion {
           {
             // Mark that we're in the pending downgrade state
             accumulate_local_references();
-            const AddressSpaceID target = get_downgrade_target(owner);
+            const AddressSpaceID target = round_parent;
             DistributedDowngradeResponse rez;
             {
               RezCheck z(rez);
@@ -1230,17 +1474,20 @@ namespace Legion {
           {
             // We only get here if we're the owner and we don't know
             // about any remote instances yet. The only way that
-            // should happen is if we have some sent global references
-            // There's nothing to do yet since we know we can't be
-            // deleted yet
-            legion_assert(sent_global_references > 0);
-            legion_assert(sent_global_references != received_global_references);
+            // should happen is if we have some packed references at
+            // the current level. There's nothing to do yet since we
+            // know we can't be deleted yet: the eventual unpack will
+            // send us a restart notification.
+            legion_assert(has_packed_references());
           }
         }
       }
       else if (local_space != owner)
       {
-        const AddressSpaceID target = get_downgrade_target(owner);
+        // Our not-ready answer forces the owner to retry, which subsumes
+        // any parked restart or deferred unpack notification we hold
+        pending_downgrade_restart = false;
+        const AddressSpaceID target = round_parent;
         DistributedDowngradeResponse rez;
         {
           RezCheck z(rez);
@@ -1256,52 +1503,87 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DistributedCollectable::check_for_downgrade_restart(
-        AddressSpaceID new_owner, LamportClock lamport_clock)
+        AutoLock& gc, AddressSpaceID candidate, uint64_t candidate_version,
+        LamportClock lamport_clock)
     //--------------------------------------------------------------------------
     {
       // We can always safely update the lamport clock
       downgrade_lamport_clock =
           std::max(downgrade_lamport_clock, lamport_clock);
-      // If we're no longer the downgrade owner there is nothing to do
+      // The object is already dead here; the restart is vestigial
+      if ((current_state == LOCAL_REF_STATE) ||
+          (current_state == DELETED_REF_STATE))
+        return;
       if (downgrade_owner != local_space)
+      {
+        // We're not the downgrade owner. Forward the restart when we
+        // provably know a fresher owner than the sender did (re-tagged
+        // with our version so the chain terminates); otherwise park it:
+        // the parked restart vetoes our next ready vote so it cannot be
+        // lost while its cause is unresolved. Restarts must never be
+        // silently dropped: a dropped restart is a lost wakeup that
+        // leaks the object.
+        if (downgrade_owner_version > candidate_version)
+        {
+          DistributedDowngradeRestart rez;
+          rez.serialize(did);
+          rez.serialize(candidate);
+          rez.serialize(downgrade_owner_version);
+          rez.serialize(downgrade_lamport_clock);
+          rez.dispatch(downgrade_owner);
+        }
+        else
+          pending_downgrade_restart = true;
         return;
-      // If there is a downgrade in progress there's nothing for us to do
+      }
+      // If there is a downgrade round in flight, park the restart as a
+      // veto; the round's decision will observe it and retry
       if (remaining_responses > 0)
+      {
+        pending_downgrade_restart = true;
         return;
-      // If we can't downgrade then we'll restart the downgrade proces
-      if ((current_state == LOCAL_REF_STATE) || !can_downgrade())
+      }
+      // Registration gate, mirroring check_for_downgrade: we must not
+      // transfer ownership or start a round before our registration is
+      // acknowledged. This also closes fuzzer finding F14: a thread gate-
+      // waiting in check_for_downgrade validated its ownership belief
+      // BEFORE releasing the lock, and a transfer through its window arms
+      // a round rooted under a stale belief. Park the restart as a veto;
+      // the gated round's decision or can_delete drains it.
+      if (!remote_registered)
+      {
+        // Make sure the parked veto has a guaranteed wakeup: the
+        // deferred registration check drains it (can_delete) once our
+        // registration is acknowledged
+        pending_downgrade_restart = true;
         return;
-      // A deferred DowngradeRestart from a remote can arrive after the
-      // previous cycle finished with notready_owner already pointing
-      // elsewhere. That cycle is already over; drop this stale nudge
-      // rather than asserting.
-      if (notready_owner != local_space)
-        return;
-      // The DowngradeRestart can race with the sender's
-      // DistributedRemoteRegistration and arrive first. If we don't
-      // know about this remote yet (it's not in remote_instances or
-      // the collective_mapping), drop the restart; the upcoming
-      // registration will trigger the proper ownership transfer in
-      // update_remote_instances.
-      if ((new_owner != local_space) && !remote_instances.contains(new_owner) &&
-          ((collective_mapping == nullptr) ||
-           !collective_mapping->contains(new_owner)))
+      }
+      // If we can't downgrade then the removal of our own references
+      // will restart the downgrade process
+      if (!can_downgrade())
         return;
       legion_assert(
           (current_state == VALID_REF_STATE) ||
           (current_state == GLOBAL_REF_STATE));
       // Restart the downgrade process
-      if (new_owner != local_space)
+      if (candidate != local_space)
       {
-        downgrade_owner = new_owner;
+        // Transfer ownership to the candidate under a new version. Note
+        // we don't require the candidate to be in remote_instances: this
+        // can race with the candidate's registration, and the update
+        // handler on the far side blocks in find_distributed_collectable
+        // until the instance exists.
+        downgrade_owner = candidate;
+        downgrade_owner_version++;
         DistributedDowngradeUpdate rez;
         rez.serialize(did);
         rez.serialize(current_state);
+        rez.serialize(downgrade_owner_version);
         rez.serialize(downgrade_lamport_clock);
-        rez.dispatch(new_owner);
+        rez.dispatch(candidate);
       }
       else
-        check_for_downgrade(new_owner, downgrade_lamport_clock + 1);
+        check_for_downgrade(gc, local_space, downgrade_lamport_clock + 1);
     }
 
     //--------------------------------------------------------------------------
@@ -1341,59 +1623,81 @@ namespace Legion {
       derez.deserialize(to_check);
       AddressSpaceID downgrade_owner;
       derez.deserialize(downgrade_owner);
+      uint64_t owner_version;
+      derez.deserialize(owner_version);
       LamportClock lamport_clock;
       derez.deserialize(lamport_clock);
 
       // It's possible for this to race with the creation of this
       // distributed collectable so wait until it is ready
       DistributedCollectable* dc = runtime->find_distributed_collectable(did);
-      dc->process_downgrade_request(downgrade_owner, to_check, lamport_clock);
+      dc->process_downgrade_request(
+          source, downgrade_owner, owner_version, to_check, lamport_clock);
     }
 
     //--------------------------------------------------------------------------
     void DistributedCollectable::process_downgrade_request(
-        AddressSpaceID owner, State to_check, LamportClock lamport_clock)
+        AddressSpaceID source, AddressSpaceID owner, uint64_t owner_version,
+        State to_check, LamportClock lamport_clock)
     //--------------------------------------------------------------------------
     {
       legion_assert(owner != local_space);  // we should be remote here
       legion_assert(
           (to_check == GLOBAL_REF_STATE) || (to_check == VALID_REF_STATE));
       AutoLock gc(gc_lock);
-      // If the owner is asking us to downgrade a state that is less than
-      // our current state then that is because the downgrade from our
-      // current state has already been done on the owner and we should
-      // perform our local down grade to reflect that first
-      while (to_check < current_state) perform_downgrade(gc);
+      // Our response is owed to the node that sent this request (it
+      // counted us in its remaining_responses); remember it for every
+      // response path of this round
+      round_parent = source;
+      // Adopt the round's downgrade owner only if its version is strictly
+      // newer than the one we know; we still vote in the round either way
+      if (owner_version > downgrade_owner_version)
+      {
+        downgrade_owner = owner;
+        downgrade_owner_version = owner_version;
+      }
+      // If the owner is asking us to downgrade from a level below our
+      // current state then this request is a commit proof: rounds for a
+      // level are only started once the downgrade of the level above has
+      // committed everywhere, so we can (and must) apply our own pending
+      // downgrade of the level above before voting at the round's level.
+      // We must have voted at the level above for it to have committed,
+      // so we can only be in a pending state here; a node that is still
+      // fully at the level above (e.g. holding valid references) seeing
+      // a lower-level round is a protocol violation.
+      if (to_check < current_state)
+      {
+        legion_assert(current_state == PENDING_GLOBAL_REF_STATE);
+        perform_downgrade(gc);
+        // perform_downgrade releases the lock for its invalidation
+        // callback; another thread can have started a round through us
+        // in that window (e.g. an ownership transfer making us the
+        // downgrade owner). Answer not-ready so the round owner
+        // retries; our own round subsumes this one's interest in us.
+        if (remaining_responses > 0)
+        {
+          const AddressSpaceID target = round_parent;
+          DistributedDowngradeResponse rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(local_space);
+            rez.serialize<uint64_t>(0);  // sent global references
+            rez.serialize<uint64_t>(0);  // received global references
+            rez.serialize(downgrade_lamport_clock);
+          }
+          rez.dispatch(target);
+          return;
+        }
+      }
       legion_assert(LOCAL_REF_STATE < current_state);
-      check_for_downgrade(owner, lamport_clock);
-    }
-
-    //--------------------------------------------------------------------------
-    AddressSpaceID DistributedCollectable::get_downgrade_target(
-        AddressSpaceID owner) const
-    //--------------------------------------------------------------------------
-    {
-      legion_assert(owner != local_space);
-      if (collective_mapping == nullptr)
-      {
-        if (local_space == owner_space)
-          return owner;
-        else
-          return owner_space;
-      }
-      if (!collective_mapping->contains(local_space))
-      {
-        legion_assert(!is_owner());
-        return collective_mapping->find_nearest(local_space);
-      }
-      if (!collective_mapping->contains(owner))
-      {
-        if (is_owner())
-          return owner;
-        else
-          return collective_mapping->get_parent(owner_space, local_space);
-      }
-      return collective_mapping->get_parent(owner, local_space);
+      // We must now be at the round's level: stamped creations guarantee
+      // no replica can exist below the object's committed level, so a
+      // node below the round's level would mean mixed-level counting
+      legion_assert(
+          (to_check != VALID_REF_STATE) || (current_state == VALID_REF_STATE) ||
+          (current_state == PENDING_GLOBAL_REF_STATE));
+      check_for_downgrade(gc, owner, lamport_clock);
     }
 
     //--------------------------------------------------------------------------
@@ -1407,9 +1711,9 @@ namespace Legion {
       // Merge in the lamport clock
       downgrade_lamport_clock =
           std::max(downgrade_lamport_clock, lamport_clock);
-      if (notready != downgrade_owner)
+      if (notready != round_owner)
         notready_owner = notready;
-      else if (notready_owner == downgrade_owner)
+      else if (notready_owner == round_owner)
       {
         // Everything still ready for downgrade
         total_sent_references += total_sent;
@@ -1419,17 +1723,20 @@ namespace Legion {
       {
         // Accumulate our local sent and received references
         accumulate_local_references();
-        if (downgrade_owner == local_space)
+        if (round_owner == local_space)
         {
+          legion_assert(downgrade_owner == local_space);
           legion_assert(
               (current_state == VALID_REF_STATE) ||
               (current_state == GLOBAL_REF_STATE));
           // See if it safe to downgrade
           // Make sure to check ourselves again to handle any
-          // check_*_and_increment methods
-          if (can_downgrade() && (notready_owner == downgrade_owner) &&
+          // check_*_and_increment methods; a pending restart (deferred
+          // unpack traffic or a parked restart) vetoes the decision
+          if (can_downgrade() && (notready_owner == round_owner) &&
               (total_sent_references == total_received_references) &&
-              (downgrade_lamport_clock <= pending_downgrade_lamport_clock))
+              (downgrade_lamport_clock <= pending_downgrade_lamport_clock) &&
+              !pending_downgrade_restart)
           {
             // Then perform our local downgrade
             return perform_downgrade(gc);
@@ -1437,15 +1744,30 @@ namespace Legion {
           else
           {
             // Not ready to downgrade
-            if (notready_owner != downgrade_owner)
+            if (notready_owner != round_owner)
             {
-              // Update the new owner responsible for checking for downgrades
+              // Update the new owner responsible for checking for
+              // downgrades; every ownership transfer mints a new version
               downgrade_owner = notready_owner;
+              downgrade_owner_version++;
               DistributedDowngradeUpdate rez;
               rez.serialize(did);
               rez.serialize(current_state);
+              rez.serialize(downgrade_owner_version);
               rez.serialize(downgrade_lamport_clock);
               rez.dispatch(notready_owner);
+              if (pending_downgrade_restart)
+              {
+                // Hand the veto we were holding to the new owner as a
+                // restart proposing us: it must not conclude we're quiet
+                pending_downgrade_restart = false;
+                DistributedDowngradeRestart rez2;
+                rez2.serialize(did);
+                rez2.serialize(local_space);
+                rez2.serialize(downgrade_owner_version);
+                rez2.serialize(downgrade_lamport_clock);
+                rez2.dispatch(notready_owner);
+              }
             }
             // else: we used to do this, but the polling aspect of continuing
             // to check for downgrades can cause priority inversions in the
@@ -1455,23 +1777,34 @@ namespace Legion {
             // do an unpack that might need to restart this process. The first
             // one to get here will restart the downgrade process.
             // See the calls to check_for_downgrade_restart to see where
-            // progress comes from now. The one exception here is in the case
-            // where we had a causality violation in which case it is ok to
-            // retry
-            else if (pending_downgrade_lamport_clock < downgrade_lamport_clock)
-              check_for_downgrade(downgrade_owner, downgrade_lamport_clock);
+            // progress comes from now. The exceptions are a causality
+            // violation and a vetoed decision (a restart arrived or
+            // reference traffic passed through mid-round), where the
+            // retry responsibility is ours
+            else
+            {
+              const bool retry =
+                  (pending_downgrade_lamport_clock < downgrade_lamport_clock) ||
+                  pending_downgrade_restart;
+              pending_downgrade_restart = false;
+              if (retry)
+                check_for_downgrade(
+                    gc, downgrade_owner, downgrade_lamport_clock);
+            }
           }
         }
         else
         {
-          const AddressSpaceID target = get_downgrade_target(downgrade_owner);
+          const AddressSpaceID target = round_parent;
           // We had to release the lock to send the requests to our upstream
           // nodes so we need to check again to see if it is still safe to
           // perform the downgrade on this node or not atomically with
-          // accumulating our sent and received references
+          // accumulating our sent and received references; a pending
+          // restart vetoes our ready vote just like at a leaf
           DistributedDowngradeResponse rez;
           if (can_downgrade() &&
-              (downgrade_lamport_clock <= pending_downgrade_lamport_clock))
+              (downgrade_lamport_clock <= pending_downgrade_lamport_clock) &&
+              !pending_downgrade_restart)
           {
             RezCheck z(rez);
             rez.serialize(did);
@@ -1484,6 +1817,9 @@ namespace Legion {
           }
           else
           {
+            // Our not-ready answer forces the round owner to retry,
+            // which subsumes any parked restart we hold
+            pending_downgrade_restart = false;
             RezCheck z(rez);
             rez.serialize(did);
             rez.serialize(local_space);
@@ -1561,19 +1897,28 @@ namespace Legion {
         AutoLock& gc, State to_check, LamportClock lamport_clock)
     //--------------------------------------------------------------------------
     {
-      legion_assert(downgrade_owner != local_space);
       legion_assert(to_check == GLOBAL_REF_STATE);
-      // It's possible we get this notification before the update saying
-      // that the downgrade from the previous state has been successful
-      // so make sure to update accordingly
-      while (to_check < current_state) perform_downgrade(gc);
-      if (current_state < to_check)
-        current_state = to_check;
+      // We're the new downgrade owner (the version was already adopted
+      // by the handler before calling us)
       downgrade_owner = local_space;
       downgrade_lamport_clock =
           std::max(downgrade_lamport_clock, lamport_clock);
-      if (gc_references == 0)
-        check_for_downgrade(downgrade_owner, downgrade_lamport_clock + 1);
+      // If we voted in the round that just failed, roll our vote back;
+      // ownership transfers never move the state downward: downgrades
+      // only ever happen through committed rounds or their success
+      // notifications
+      if (current_state == PENDING_LOCAL_REF_STATE)
+        current_state = GLOBAL_REF_STATE;
+      if (remaining_responses == 0)
+      {
+        // We're the owner now so we act on (and thereby drain) any
+        // parked restart or deferred notification directly; if a round
+        // is still aggregating through this node the flag stays as the
+        // veto protecting that round's decision
+        pending_downgrade_restart = false;
+        if ((current_state == GLOBAL_REF_STATE) && (gc_references == 0))
+          check_for_downgrade(gc, downgrade_owner, downgrade_lamport_clock + 1);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1585,6 +1930,8 @@ namespace Legion {
       derez.deserialize(did);
       DistributedCollectable::State state;
       derez.deserialize(state);
+      uint64_t owner_version;
+      derez.deserialize(owner_version);
       LamportClock lamport_clock;
       derez.deserialize(lamport_clock);
 
@@ -1592,6 +1939,12 @@ namespace Legion {
       // of this distributed collectable so wait for it to be ready
       DistributedCollectable* dc = runtime->find_distributed_collectable(did);
       AutoLock gc(dc->gc_lock);
+      // Ownership is only ever adopted from strictly newer versions; a
+      // stale transfer (e.g. one that raced with a fresher one through
+      // another node) must be dropped or it can resurrect a dead owner
+      if (owner_version <= dc->downgrade_owner_version)
+        return;
+      dc->downgrade_owner_version = owner_version;
       dc->process_downgrade_update(gc, state, lamport_clock);
     }
 
@@ -1602,6 +1955,10 @@ namespace Legion {
     {
       DistributedID did;
       derez.deserialize(did);
+      AddressSpaceID candidate;
+      derez.deserialize(candidate);
+      uint64_t candidate_version;
+      derez.deserialize(candidate_version);
       LamportClock lamport_clock;
       derez.deserialize(lamport_clock);
       // It's possible for these messages to race with actual downgrades and
@@ -1614,7 +1971,8 @@ namespace Legion {
       {
         {
           AutoLock gc(dc->gc_lock);
-          dc->check_for_downgrade_restart(source, lamport_clock);
+          dc->check_for_downgrade_restart(
+              gc, candidate, candidate_version, lamport_clock);
         }
         if (dc->remove_base_resource_ref(RUNTIME_REF))
           delete dc;
@@ -2047,13 +2405,14 @@ namespace Legion {
       // with the owner node otherwise we need to wait for that
       // registration to succeed before we can pack in order to avoid
       // spurious successful downgrades
-      if (remote_registered.exists())
+      if (!remote_registered)
       {
-        const RtEvent wait_on = remote_registered;
+        if (!pending_remote_registered.exists())
+          pending_remote_registered = Runtime::create_rt_user_event();
+        const RtEvent wait_on = pending_remote_registered;
         gc.release();
         wait_on.wait();
         gc.reacquire();
-        remote_registered = RtEvent::NO_RT_EVENT;
         // Should still be valid
         legion_assert(current_state == VALID_REF_STATE);
       }
@@ -2083,14 +2442,18 @@ namespace Legion {
       LamportClock prev_clock;
       derez.deserialize(prev_clock);
       downgrade_lamport_clock = std::max(downgrade_lamport_clock, prev_clock);
-      // No need to send any notifications if a downgrade is in process
+      // No need to send any notifications if a downgrade is in process,
+      // but we do need to record the veto so the in-flight round cannot
+      // commit a decision that this unpacked reference invalidates
       if (remaining_responses == 0)
       {
         if (downgrade_owner == local_space)
         {
           // We're the downgrade owner so check to see if we can resume
           // doing collections or we can wait for the next removal
-          check_for_downgrade_restart(local_space, downgrade_lamport_clock);
+          check_for_downgrade_restart(
+              gc, local_space, downgrade_owner_version,
+              downgrade_lamport_clock);
         }
         else if (
             (current_state == PENDING_GLOBAL_REF_STATE) ||
@@ -2107,6 +2470,8 @@ namespace Legion {
           // to notify the downgrade owner about the unpacked references
           DistributedDowngradeRestart rez;
           rez.serialize(did);
+          rez.serialize(local_space);  // propose ourselves as the candidate
+          rez.serialize(downgrade_owner_version);
           rez.serialize(downgrade_lamport_clock);
           rez.dispatch(downgrade_owner);
         }
@@ -2118,6 +2483,13 @@ namespace Legion {
           // notification until our valid_references returns to zero.
           pending_downgrade_restart = true;
         }
+      }
+      else
+      {
+        // A downgrade round is in flight through this node: the unpacked
+        // reference must veto the round's decision so the counts we
+        // already reported cannot cancel against this receipt
+        pending_downgrade_restart = true;
       }
     }
 
@@ -2182,26 +2554,59 @@ namespace Legion {
         AutoLock& gc, State to_check, LamportClock lamport_clock)
     //--------------------------------------------------------------------------
     {
-      legion_assert(downgrade_owner != local_space);
       legion_assert(
           (to_check == VALID_REF_STATE) || (to_check == GLOBAL_REF_STATE));
-      // It's possible we get this notification before the update saying
-      // that the downgrade from the previous state has been successful
-      // so make sure to update accordingly
-      while (to_check < current_state) perform_downgrade(gc);
-      if ((current_state == VALID_REF_STATE) ||
-          (current_state == PENDING_GLOBAL_REF_STATE))
+      downgrade_lamport_clock =
+          std::max(downgrade_lamport_clock, lamport_clock);
+      // Ownership transfers are stamped with the sender's level; only
+      // roll back our pending vote if the failed round was at our
+      // pending level. An update stamped with the global level arriving
+      // while we are pending-global is a commit proof for the valid
+      // level (the sender had already left it, which can only happen
+      // once the valid level committed everywhere), so we apply our
+      // pending valid-level downgrade instead of rolling it back:
+      // resurrecting a committed valid-level vote would let this node
+      // return to the valid level after the object has died there.
+      if (current_state == PENDING_GLOBAL_REF_STATE)
       {
-        downgrade_owner = local_space;
-        downgrade_lamport_clock =
-            std::max(downgrade_lamport_clock, lamport_clock);
-        current_state = VALID_REF_STATE;
-        if (valid_references == 0)
-          check_for_downgrade(downgrade_owner, downgrade_lamport_clock + 1);
+        if (to_check == VALID_REF_STATE)
+          current_state = VALID_REF_STATE;
+        else
+        {
+          // Do this before adopting the downgrade ownership below so
+          // perform_downgrade still sees us as a remote voter
+          perform_downgrade(gc);
+          // perform_downgrade releases the lock for its invalidation
+          // callback; a fresher ownership transfer can have raced
+          // through the window and started a round through us. Its
+          // round subsumes ours, and pending_downgrade_restart may be
+          // the veto protecting its decision, so leave it alone.
+          if (remaining_responses > 0)
+          {
+            downgrade_owner = local_space;
+            return;
+          }
+        }
       }
-      else
-        DistributedCollectable::process_downgrade_update(
-            gc, to_check, lamport_clock);
+      else if (current_state == PENDING_LOCAL_REF_STATE)
+      {
+        legion_assert(to_check == GLOBAL_REF_STATE);
+        current_state = GLOBAL_REF_STATE;
+      }
+      // We're the new downgrade owner (the version was already adopted
+      // by the handler before calling us)
+      downgrade_owner = local_space;
+      if (remaining_responses == 0)
+      {
+        // We're the owner now so we act on (and thereby drain) any
+        // parked restart or deferred notification directly; if a round
+        // is still aggregating through this node the flag stays as the
+        // veto protecting that round's decision
+        pending_downgrade_restart = false;
+        if (((current_state == VALID_REF_STATE) && (valid_references == 0)) ||
+            ((current_state == GLOBAL_REF_STATE) && (gc_references == 0)))
+          check_for_downgrade(gc, downgrade_owner, downgrade_lamport_clock + 1);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2236,6 +2641,55 @@ namespace Legion {
       }
       else
         DistributedCollectable::record_pending_downgrade();
+    }
+
+    //--------------------------------------------------------------------------
+    bool ValidDistributedCollectable::has_packed_references(void) const
+    //--------------------------------------------------------------------------
+    {
+      // At the valid level we have to account for the valid-level counts
+      // as well: creations are counted at the level of their stamp, so a
+      // packed reference at either level can be carrying our valid level
+      // to a new replica
+      if ((current_state == VALID_REF_STATE) ||
+          (current_state == PENDING_GLOBAL_REF_STATE))
+        return (sent_valid_references != received_valid_references) ||
+               (sent_global_references != received_global_references);
+      return DistributedCollectable::has_packed_references();
+    }
+
+    //--------------------------------------------------------------------------
+    bool ValidDistributedCollectable::record_valid_stamp(unsigned cnt)
+    //--------------------------------------------------------------------------
+    {
+      // Global references packed while we are at the valid level are
+      // stamped with it and counted at the valid level as well: the
+      // receiver may be a brand new replica that must be born in our
+      // known state, and the valid-level round tallies must see the
+      // creation while it is in flight
+      if ((current_state != VALID_REF_STATE) &&
+          (current_state != PENDING_GLOBAL_REF_STATE))
+        return false;
+      sent_valid_references += cnt;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void ValidDistributedCollectable::apply_valid_stamp(unsigned cnt)
+    //--------------------------------------------------------------------------
+    {
+      received_valid_references += cnt;
+      // Replicas are born in the creator's known state: if a creation
+      // site constructed us at the global level while the creator was
+      // still at the valid level, promote to the stamped level. For a
+      // replica that already existed, receiving a valid-level stamp
+      // below the valid level is unreachable: the stamped count blocks
+      // the valid-level round from committing while the reference is in
+      // flight, so nothing can have moved us below the valid level.
+      legion_assert(current_state != PENDING_LOCAL_REF_STATE);
+      legion_assert(current_state != LOCAL_REF_STATE);
+      if (current_state == GLOBAL_REF_STATE)
+        current_state = VALID_REF_STATE;
     }
 
   }  // namespace Internal

@@ -225,7 +225,20 @@ namespace Legion {
       void unregister_active_context(InnerContext* context);
     public:
       PieceIteratorImpl* create_piece_iterator(IndexSpaceNode* privilege_node);
+      // The external entry: callers must hold a valid reference on this
+      // manager when initially recording a user (TLA+ InstanceGC F1)
       void record_instance_user(ApEvent term_event, std::set<RtEvent>& applied);
+      // Internal reinvocations only (the owner-side handler of
+      // GarbageCollectionRecordEvent and the round-commit shipping call
+      // in GarbageCollectionAcquire): these can legally run without a
+      // valid reference and while not in VALID_GC_STATE
+      void record_instance_user_internal(
+          ApEvent term_event, std::set<RtEvent>& applied);
+    protected:
+      // Insert a user event into gc_events (with epoch-based pruning);
+      // must be called while holding the instance lock
+      void record_gc_event(ApEvent term_event);
+    public:
       void process_remote_reference_mismatch(
           uint64_t sent, uint64_t received, LamportClock lamport_clock);
       void find_shutdown_preconditions(std::set<ApEvent>& preconditions);
@@ -294,7 +307,16 @@ namespace Legion {
     protected:
       // Stuff for garbage collection
       std::atomic<GarbageCollectionState> gc_state;
+      // Count of collect() callers that have joined the current
+      // collection round and not yet woken from collection_ready. Every
+      // wake path decrements it; the last waiter to drain a failed round
+      // returns gc_state to COLLECTABLE, and no new round may begin
+      // until it reaches zero (TLA+ InstanceGC F4: otherwise a stranded
+      // waiter can decide a later, half-collected round).
       unsigned pending_changes;
+      // Whether the current collection round's decision has been made
+      // (decide-once, F4): later wakers only drain pending_changes
+      bool collection_decided;
       std::atomic<unsigned> failed_collection_count;
       RtEvent collection_ready;
       // Garbage collection priorities
@@ -314,6 +336,15 @@ namespace Legion {
       std::atomic<int> valid_references;
 #endif
       uint64_t sent_valid_references, received_valid_references;
+      // Round-local accumulators for remote reference-count reports
+      // (analogous to the downgrade protocol's total_sent/received):
+      // remote mismatch reports fold in HERE, never into the primary
+      // counters above, and they are simply reset at the next round
+      // start. The primary counters are the node's cumulative log and
+      // are never restored (TLA+ InstanceGC F2: the old
+      // snapshot/restore erased legitimate mid-round reference traffic
+      // at an acquire-saved owner).
+      uint64_t total_sent_valid_references, total_received_valid_references;
       // Lamport clock for the valid-reference instance-collection protocol
       // (analogous to DistributedCollectable::downgrade_lamport_clock, but for
       // this separate protocol and guarded by inst_lock). Stamped onto packed

@@ -125,6 +125,7 @@ namespace Legion {
   __op__(SLICE_REMOTE_OUTPUT_EXTENTS, SliceRemoteOutputExtents, "Slice Task Set Remote Output Extents Message", true, false, false) \
   __op__(SLICE_REMOTE_OUTPUT_REGISTRATION, SliceRemoteOutputRegistration, "Slice Task Remote Output Registration Message", true, false, false) \
   __op__(DISTRIBUTED_REMOTE_REGISTRATION, DistributedRemoteRegistration, "Distributed Collectable Remote Registration Message", false, true, true) \
+  __op__(DISTRIBUTED_REGISTRATION_RESPONSE, DistributedRegistrationResponse, "Distributed Collectable Registration Response Message", true, true, true) \
   __op__(DISTRIBUTED_DOWNGRADE_REQUEST, DistributedDowngradeRequest, "Distributed Collectable Downgrade Request", false, true, true) \
   __op__(DISTRIBUTED_DOWNGRADE_RESPONSE, DistributedDowngradeResponse, "Distributed Collectable Downgrade Response", true, true, true) \
   __op__(DISTRIBUTED_DOWNGRADE_SUCCESS, DistributedDowngradeSuccess, "Distributed Collectable Downgrade Success Message", false, true, true) \

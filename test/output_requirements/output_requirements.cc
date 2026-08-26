@@ -133,18 +133,31 @@ void OutReqTestMapper::select_task_options(const MapperContext    ctx,
                                                  TaskOptions&     output)
 {
   DefaultMapper::select_task_options(ctx, task, output);
-  if (task.task_id == TID_PRODUCER_GLOBAL || task.task_id == TID_PRODUCER_LOCAL)
-    producer_mappings[static_cast<TaskIDs>(task.task_id)] = output.initial_proc;
-  else if (task.tag == TAG_LOCAL_PROCESSOR)
+  TaskIDs producer;
+  switch (task.task_id)
   {
-    if (task.task_id == TID_CONSUMER_GLOBAL)
-      output.initial_proc = producer_mappings[TID_PRODUCER_GLOBAL];
-    else
-    {
-      assert(task.task_id == TID_CONSUMER_LOCAL);
-      output.initial_proc = producer_mappings[TID_PRODUCER_LOCAL];
-    }
+    case TID_PRODUCER_GLOBAL:
+      producer = TID_PRODUCER_GLOBAL;
+      break;
+    case TID_PRODUCER_LOCAL:
+      producer = TID_PRODUCER_LOCAL;
+      break;
+    case TID_CONSUMER_GLOBAL:
+      if (task.tag != TAG_LOCAL_PROCESSOR)
+        return;
+      producer = TID_PRODUCER_GLOBAL;
+      break;
+    case TID_CONSUMER_LOCAL:
+      if (task.tag != TAG_LOCAL_PROCESSOR)
+        return;
+      producer = TID_PRODUCER_LOCAL;
+      break;
+    default:
+      return;
   }
+  const std::pair<std::map<TaskIDs, Processor>::iterator, bool> result =
+    producer_mappings.emplace(producer, output.initial_proc);
+  output.initial_proc = result.first->second;
 }
 
 void OutReqTestMapper::slice_task(const MapperContext ctx,
