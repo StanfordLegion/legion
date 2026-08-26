@@ -40,7 +40,7 @@ target_include_directories(
     realm_kokkos
     PUBLIC
         $<BUILD_INTERFACE:${REALM_SOURCE_DIR}/..>
-        $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
+        $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
     PRIVATE
         $<$<TARGET_EXISTS:CUDA::cuda_driver>:${CUDAToolkit_CUPTI_INCLUDE_DIR}>
         $<$<TARGET_EXISTS:CUDA::cuda_driver>:${CUDAToolkit_INCLUDE_DIR}>
