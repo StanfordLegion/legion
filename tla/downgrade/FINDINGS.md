@@ -733,3 +733,39 @@ uses a blocking find + hard assert, justified by: an unregistered
 replica cannot reach a deletable state (LOCAL requires a G-level
 perform_downgrade, reachable only via a ready vote or a success after
 voting -- both gate-blocked -- or catch-up, which stops at GLOBAL).
+
+### F17 CORRECTED (2026-08-30, after Mike's covering-invariant challenge)
+The "refless bystander" mechanism was WRONG. The true mechanism of the
+gc.cc:1255 crashes is the SILENT COVERED PROMOTION: add_gc_reference
+(and the debug variants) at PENDING_LOCAL promotes the state back to
+GLOBAL -- uncounted, with no notification to the round owner
+(gc.cc:212-213, 523-524, 542-543; valid-level analogs promote
+PENDING_GLOBAL back to VALID). This is SOUND because of the covering
+discipline: an unconditional add is only legal while a reference is
+held somewhere, every gc-reference chain bottoms out in a
+protocol-visible root (a held ref votes not-ready; an in-flight ref is
+counted), so no round can commit while any chain is live. A replica
+can therefore ready-vote, promote under a cover, release, and
+legitimately receive the commit's success while at GLOBAL/non-owner --
+with ANY reference counts (the captures' zero counts merely reflect
+that equivalence sets are request-created and never exchange counted
+references; pclk=1 in the captures shows the replica HAD voted).
+Consequences:
+- The count-gated assert weakening from the first F17 fix was TOO
+  NARROW (a counted promoted replica would re-fire it); corrected to
+  (LIVE-state) \/ (PENDING-state /\ non-owner). gc_references == 0
+  stays strict at success application: post-commit no cover can exist,
+  so no legal add can race the delivery.
+- Findings (a) missed-success leak and (b) unlocked remote_instances
+  map race are RETRACTED: any in-flight replication (request /
+  response / registration window) is covered by the requester's
+  analysis, a cover blocks the commit, so no add and no success can
+  be concurrent with the commit fan. The unlocked map at gc.cc:1281
+  is safe BY the discipline (worth citing it in the comment there).
+- The model's CreateRefless extension modeled UNCOVERED creations
+  (violating the discipline); its DeadOwnerClean violation was an
+  artifact. Machinery reverted; the spec is back to the committed
+  Stage-3 form. OPEN (Mike's ruling): a faithful model extension --
+  covered uncounted adds at PENDING states with promotion, reusing
+  the pins machinery -- would machine-check the covering-discipline
+  argument itself (incl. "gc_refs == 0 at success delivery").

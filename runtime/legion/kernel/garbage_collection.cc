@@ -1252,9 +1252,15 @@ namespace Legion {
       legion_assert(gc_references == 0);
       // Should be in the GLOBAL_REF_STATE on the owner and
       // PENDING_LOCAL_REF_STATE if we're not the downgrade owner
+      // GLOBAL is legal for any ownership here (finding F17): a remote
+      // replica that ready-voted in the committing round can be silently
+      // promoted back to GLOBAL by a covered (uncounted) add_gc_reference
+      // before the round decides; the covering discipline guarantees the
+      // commit waited for the cover chain to quiesce, so applying the
+      // success at GLOBAL is exactly right (and gc_references == 0 above
+      // still holds at delivery because no cover can exist post-commit).
       legion_assert(
-          ((current_state == GLOBAL_REF_STATE) &&
-           (downgrade_owner == local_space)) ||
+          (current_state == GLOBAL_REF_STATE) ||
           ((current_state == PENDING_LOCAL_REF_STATE) &&
            (downgrade_owner != local_space)));
       // Downgrade the state first so that we don't duplicate the callback
@@ -2514,9 +2520,12 @@ namespace Legion {
         legion_assert(valid_references == 0);
         // Should be in the GLOBAL_REF_STATE on the owner and
         // PENDING_LOCAL_REF_STATE if we're not the downgrade owner
+        // VALID is legal for any ownership here: the valid-level analog
+        // of the covered promotion (add_valid_reference bumps
+        // PENDING_GLOBAL back to VALID without notifying the round
+        // owner); see finding F17
         legion_assert(
-            ((current_state == VALID_REF_STATE) &&
-             (downgrade_owner == local_space)) ||
+            (current_state == VALID_REF_STATE) ||
             ((current_state == PENDING_GLOBAL_REF_STATE) &&
              (downgrade_owner != local_space)));
         // Send messages while holding the lock because the remote_instances
