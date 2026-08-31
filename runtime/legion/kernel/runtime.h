@@ -1028,6 +1028,13 @@ namespace Legion {
       void unregister_distributed_collectable(DistributedID did);
       bool has_distributed_collectable(DistributedID did);
       DistributedCollectable* find_distributed_collectable(DistributedID did);
+      // Return the registered instance, or park the downgrade ownership
+      // transfer for inline application at registration and return
+      // nullptr (never blocks; see finding F18 and the member comment on
+      // the PendingCollectable struct)
+      DistributedCollectable* find_or_park_downgrade_update(
+          DistributedID did, unsigned state, uint64_t owner_version,
+          LamportClock lamport_clock);
       DistributedCollectable* weak_find_distributed_collectable(
           DistributedID did);
       template<typename T>
@@ -1465,8 +1472,19 @@ namespace Legion {
     protected:
       mutable LocalLock distributed_collectable_lock;
       lng::map<DistributedID, DistributedCollectable*> dist_collectables;
-      std::map<DistributedID, std::pair<DistributedCollectable*, RtUserEvent> >
-          pending_collectables;
+      // A distributed collectable that has been referenced here but whose
+      // instance has not registered yet. Also carries any downgrade
+      // ownership transfer that raced ahead of the instance's creation
+      struct PendingCollectable {
+      public:
+        DistributedCollectable* pending = nullptr;
+        RtUserEvent registered;
+        unsigned downgrade_state = 0;
+        uint64_t downgrade_owner_version = 0;
+        LamportClock downgrade_lamport_clock = 0;
+        bool has_downgrade_update = false;
+      };
+      std::map<DistributedID, PendingCollectable> pending_collectables;
     protected:
       mutable LocalLock is_slice_lock;
       std::map<Domain, IndexSpaceNode*> dense_slice_spaces;

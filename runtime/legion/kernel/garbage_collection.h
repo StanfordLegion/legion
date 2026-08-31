@@ -227,6 +227,13 @@ namespace Legion {
         VALID_REF_STATE = 5,  // a second global ref state
       };
     public:
+      // Apply an ownership transfer received off the wire; shared by the
+      // downgrade update message handler and the runtime's parked-update
+      // application at registration (finding F18)
+      static void process_downgrade_update_message(
+          DistributedCollectable* dc, State state, uint64_t owner_version,
+          LamportClock lamport_clock);
+    public:
       DistributedCollectable(
           DistributedID did, bool register_with_runtime = true,
           CollectiveMapping* mapping = nullptr,

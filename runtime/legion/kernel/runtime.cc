@@ -5978,27 +5978,65 @@ namespace Legion {
     {
       did &= LEGION_DISTRIBUTED_ID_MASK;
       RtUserEvent to_trigger;
+      PendingCollectable parked;
       {
         AutoLock dc_lock(distributed_collectable_lock);
         // If we make it here then we have the lock
         legion_assert(dist_collectables.find(did) == dist_collectables.end());
         dist_collectables[did] = dc;
         // See if this was a pending collectable
-        std::map<
-            DistributedID,
-            std::pair<DistributedCollectable*, RtUserEvent> >::iterator finder =
+        std::map<DistributedID, PendingCollectable>::iterator finder =
             pending_collectables.find(did);
         if (finder != pending_collectables.end())
         {
           legion_assert(
-              (finder->second.first == dc) ||
-              (finder->second.first == nullptr));
-          to_trigger = finder->second.second;
+              (finder->second.pending == dc) ||
+              (finder->second.pending == nullptr));
+          parked = finder->second;
+          to_trigger = parked.registered;
           pending_collectables.erase(finder);
         }
       }
+      // Apply any parked ownership transfer (finding F18) BEFORE
+      // triggering the registered event: every handler that unblocks on
+      // the event must observe the transfer already applied, which
+      // preserves the ordering the acquire virtual channel provides
+      // between updates and the acquire requests behind them
+      if (parked.has_downgrade_update)
+        DistributedCollectable::process_downgrade_update_message(
+            dc,
+            static_cast<DistributedCollectable::State>(parked.downgrade_state),
+            parked.downgrade_owner_version, parked.downgrade_lamport_clock);
       if (to_trigger.exists())
         Runtime::trigger_event(to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    DistributedCollectable* Runtime::find_or_park_downgrade_update(
+        DistributedID did, unsigned state, uint64_t owner_version,
+        LamportClock lamport_clock)
+    //--------------------------------------------------------------------------
+    {
+      const DistributedID to_find = LEGION_DISTRIBUTED_ID_FILTER(did);
+      AutoLock d_lock(distributed_collectable_lock);
+      lng::map<DistributedID, DistributedCollectable*>::const_iterator finder =
+          dist_collectables.find(to_find);
+      if (finder != dist_collectables.end())
+        return finder->second;
+      // The instance is not here yet: park the transfer in the pending
+      // collectable entry (making it if needed) for application at
+      // registration, keeping only the freshest version (version gating
+      // makes application of the freshest transfer subsume staler ones)
+      PendingCollectable& pending = pending_collectables[to_find];
+      if (!pending.has_downgrade_update ||
+          (pending.downgrade_owner_version < owner_version))
+      {
+        pending.downgrade_state = state;
+        pending.downgrade_owner_version = owner_version;
+        pending.downgrade_lamport_clock = lamport_clock;
+        pending.has_downgrade_update = true;
+      }
+      return nullptr;
     }
 
     //--------------------------------------------------------------------------
@@ -6037,14 +6075,12 @@ namespace Legion {
         if (finder == dist_collectables.end())
         {
           // Check to see if it is in the pending set too
-          std::map<
-              DistributedID,
-              std::pair<DistributedCollectable*, RtUserEvent> >::const_iterator
+          std::map<DistributedID, PendingCollectable>::const_iterator
               pending_finder = pending_collectables.find(to_find);
           if (pending_finder != pending_collectables.end())
           {
-            result = pending_finder->second.first;
-            ready = pending_finder->second.second;
+            result = pending_finder->second.pending;
+            ready = pending_finder->second.registered;
           }
         }
         else
@@ -6059,23 +6095,11 @@ namespace Legion {
         if (finder == dist_collectables.end())
         {
           // Check to see if it is in the pending set too
-          std::map<
-              DistributedID,
-              std::pair<DistributedCollectable*, RtUserEvent> >::iterator
-              pending_finder = pending_collectables.find(to_find);
-          if (pending_finder == pending_collectables.end())
-            pending_finder =
-                pending_collectables
-                    .emplace(std::make_pair(
-                        to_find,
-                        std::pair<DistributedCollectable*, RtUserEvent>(
-                            (DistributedCollectable*)nullptr,
-                            RtUserEvent::NO_RT_USER_EVENT)))
-                    .first;
-          result = pending_finder->second.first;
-          if (!pending_finder->second.second.exists())
-            pending_finder->second.second = Runtime::create_rt_user_event();
-          ready = pending_finder->second.second;
+          PendingCollectable& pending = pending_collectables[to_find];
+          result = pending.pending;
+          if (!pending.registered.exists())
+            pending.registered = Runtime::create_rt_user_event();
+          ready = pending.registered;
         }
         else
           return finder->second;
@@ -6115,21 +6139,11 @@ namespace Legion {
       did &= LEGION_DISTRIBUTED_ID_MASK;
       AutoLock d_lock(distributed_collectable_lock);
       legion_assert(dist_collectables.find(did) == dist_collectables.end());
-      std::map<
-          DistributedID,
-          std::pair<DistributedCollectable*, RtUserEvent> >::iterator finder =
-          pending_collectables.find(did);
-      if (finder == pending_collectables.end())
-        finder = pending_collectables
-                     .emplace(std::make_pair(
-                         did, std::pair<DistributedCollectable*, RtUserEvent>(
-                                  (DistributedCollectable*)nullptr,
-                                  RtUserEvent::NO_RT_USER_EVENT)))
-                     .first;
-      if (finder->second.first == nullptr)
-        finder->second.first =
+      PendingCollectable& pending = pending_collectables[did];
+      if (pending.pending == nullptr)
+        pending.pending =
             legion_malloc<T, LONG_LIFETIME>(sizeof(T), alignof(T));
-      return finder->second.first;
+      return pending.pending;
     }
 
     // Instantiate the template for types that use it
@@ -6261,26 +6275,25 @@ namespace Legion {
           return finder->second;
         }
         // If it is already pending, we can just return the ready event
-        std::map<
-            DistributedID,
-            std::pair<DistributedCollectable*, RtUserEvent> >::iterator
-            pending_finder = pending_collectables.find(did);
+        std::map<DistributedID, PendingCollectable>::iterator pending_finder =
+            pending_collectables.find(did);
         if (pending_finder != pending_collectables.end())
         {
-          if (pending_finder->second.first == nullptr)
-            pending_finder->second.first =
+          if (pending_finder->second.pending == nullptr)
+            pending_finder->second.pending =
                 legion_malloc<T, LONG_LIFETIME>(sizeof(T), alignof(T));
-          if (!pending_finder->second.second.exists())
-            pending_finder->second.second = Runtime::create_rt_user_event();
-          ready = pending_finder->second.second;
-          return pending_finder->second.first;
+          if (!pending_finder->second.registered.exists())
+            pending_finder->second.registered = Runtime::create_rt_user_event();
+          ready = pending_finder->second.registered;
+          return pending_finder->second.pending;
         }
         // This is the first request we've seen for this did, make it now
         // Allocate space for the result and type case
         result = legion_malloc<T, LONG_LIFETIME>(sizeof(T), alignof(T));
         RtUserEvent to_trigger = Runtime::create_rt_user_event();
-        pending_collectables[did] =
-            std::pair<DistributedCollectable*, RtUserEvent>(result, to_trigger);
+        PendingCollectable& pending = pending_collectables[did];
+        pending.pending = result;
+        pending.registered = to_trigger;
         ready = to_trigger;
       }
       AddressSpaceID target = determine_owner(did);

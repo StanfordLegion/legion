@@ -769,3 +769,77 @@ Consequences:
   covered uncounted adds at PENDING states with promotion, reusing
   the pins machinery -- would machine-check the covering-discipline
   argument itself (incl. "gc_refs == 0 at success delivery").
+
+## F18 — Blocking finds in downgrade handlers wedge ordered virtual
+## channels: livelocked CI (2026-08-30, confirmed in gdb by Mike)
+
+Observed: CI hang with permanently stuck threads plus transient churn
+(scheduler work counters at 319M and climbing 65K/sec). Decoded:
+
+1. VISIBLE LIVELOCK -- a self-sustaining restart ping-pong between two
+   nodes with mutually stale ownership beliefs. B believes owner=A@v2,
+   A believes owner=B@v3 (B's v3 update unprocessed). B's can_delete
+   drain sends restart(cand=B, v2) -> A; A's forward guard (v3 > v2)
+   passes -> forwards (v3) -> B; B's guard (v2 > v3) fails -> parks;
+   B's handler ref-drop -> can_delete -> drain re-sends (v2) -> A.
+   Infinite regeneration at message speed; terminates only when B's
+   belief refreshes.
+2. ROOT CAUSE -- DistributedDowngradeUpdate::handle used the BLOCKING
+   find_distributed_collectable. An ownership transfer can name a node
+   whose instance's CREATING message (counted acquire grant / subsystem
+   payload; the remote_instances add happens at payload-send time) is
+   still in flight on another channel. The blocked handler wedges its
+   ordered virtual channel: everything behind it -- including
+   belief-correcting updates for other objects (feeding the storm),
+   acquire grants (the stuck acquire_global waiter at gc.cc:345), and
+   potentially the creating message itself -- never processes.
+   Confirmed by gdb: the blocked handler's wait event ID exactly
+   matches pending_collectables[161448]'s event; the pending entry has
+   first == nullptr (created by blocking finds, no find_or_request
+   outstanding).
+3. CONFORMANCE: the model's RecvUpd and RecvReqBody have
+   `node[d].st # "Absent"` as ENABLING CONDITIONS -- deferral
+   semantics; the message waits without blocking anything else. The
+   implementation realized them as blocking finds that hold the
+   channel. Same divergence class as F15's registration gate.
+
+FIX (uncommitted, third design after review): PARK-AT-REGISTRATION.
+Two earlier fixes were retracted on Mike's review, which surfaced the
+full constraint set:
+  C1: acquire REQUESTS must stay ordered behind ownership updates
+      per-pair (chase termination -- the channel comment's "circling").
+  C2: acquire RESPONSES must stay on a progress-critical channel
+      (the static asserts + the master livelock fixes for starvation).
+  C3: nothing a blocked update handler can head-of-line-block may be
+      needed to unblock it (this finding).
+Retracted fix 1 (defer via meta-task on the pending event): broke C1
+during the deferral window and the continuation is starvable under an
+acquire retry storm. Retracted fix 2 (move acquire responses to the
+unordered default channel): broke C2 (rejected by the static asserts).
+Final design: the update handler calls
+Runtime::find_or_park_downgrade_update -- under the distributed
+collectable lock it either returns the registered instance (apply
+inline as before) or parks {state, owner_version, lamport_clock} in
+pending_downgrade_updates (keeping only the freshest version) and the
+handler returns WITHOUT blocking. register_distributed_collectable
+extracts any parked transfer and applies it inline BEFORE triggering
+the pending-collectable event, so every handler that unblocks on that
+event (round requests, chased acquires) observes the transfer already
+applied -- C1 is preserved, and in the only remaining window (instance
+not yet created) chased acquires fall back to hop-limited denial,
+bounded by the creator's arrival which nothing can block any more.
+No channel changes (C2), no meta-task (no priority to mis-set, nothing
+to starve), version gating makes parked application stale-safe, and a
+parked entry for an instance that never materializes costs a few bytes
+where the blocking find cost a parked user thread. The downgrade
+REQUEST handler's blocking find is retained deliberately: requests
+ride the unordered default channel, so a blocked request handler
+wedges nothing, and its wait is bounded by the same
+creator-arrives-independently argument.
+Refinement (Mike): the parked transfer lives INSIDE the pending
+collectable entry -- pending_collectables' value is now a
+PendingCollectable struct {pending allocation, registered event,
+optional freshest downgrade transfer}. The park creates the pending
+entry if absent (restoring the invariant parked => pending by
+construction), registration consumes both with a single lookup on the
+hot path, and the transfer's lifetime is exactly the pending entry's.

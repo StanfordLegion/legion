@@ -1941,9 +1941,33 @@ namespace Legion {
       LamportClock lamport_clock;
       derez.deserialize(lamport_clock);
 
-      // It's possible for this to race with the creation and registration
-      // of this distributed collectable so wait for it to be ready
-      DistributedCollectable* dc = runtime->find_distributed_collectable(did);
+      // This transfer can race with the creation of the target instance:
+      // it can name a node whose instance's creating message is still in
+      // flight on another channel. We must NOT block waiting for it: this
+      // handler runs on the ordered acquire virtual channel and blocking
+      // wedges everything queued behind it -- including the acquire
+      // grant whose waiter may be the very handler unpacking the payload
+      // that creates this instance (finding F18: livelocked CI runs with
+      // a self-sustaining restart storm at 300M+ scheduler iterations).
+      // Instead the runtime parks the transfer and applies it inline at
+      // registration, before the pending-collectable event triggers, so
+      // every handler that unblocks on that event observes the transfer
+      // already applied -- preserving the ordering this channel provides
+      // between updates and the acquire requests behind them.
+      DistributedCollectable* dc = runtime->find_or_park_downgrade_update(
+          did, static_cast<unsigned>(state), owner_version, lamport_clock);
+      if (dc == nullptr)
+        return;
+      DistributedCollectable::process_downgrade_update_message(
+          dc, state, owner_version, lamport_clock);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void DistributedCollectable::process_downgrade_update_message(
+        DistributedCollectable* dc, State state, uint64_t owner_version,
+        LamportClock lamport_clock)
+    //--------------------------------------------------------------------------
+    {
       AutoLock gc(dc->gc_lock);
       // Ownership is only ever adopted from strictly newer versions; a
       // stale transfer (e.g. one that raced with a fresher one through
