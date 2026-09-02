@@ -562,6 +562,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       legion_assert(outstanding_operations.empty());
+      // Tripwire for the parked-protocol-state invariant: every entry in
+      // pending_collectables is consumed by a registration that is
+      // guaranteed to happen (see find_or_park_downgrade_update), so a
+      // survivor here is a leaked entry -- either a violated ownership
+      // invariant or a caller that assumed a registration which never came
+      legion_assert(pending_collectables.empty());
       if (profiler != nullptr)
       {
         delete profiler;
@@ -6007,6 +6013,22 @@ namespace Legion {
             dc,
             static_cast<DistributedCollectable::State>(parked.downgrade_state),
             parked.downgrade_owner_version, parked.downgrade_lamport_clock);
+      // Replay any acquire chases that were parked behind the instance's
+      // creation (finding F19), AFTER the ownership transfer above so
+      // they chase fresh ownership, and BEFORE the registered event for
+      // the same ordering reason as the transfer itself
+      for (std::vector<PendingAcquireRequest>::const_iterator it =
+               parked.pending_acquires.begin();
+           it != parked.pending_acquires.end(); it++)
+      {
+        if (it->valid_kind)
+          static_cast<ValidDistributedCollectable*>(dc)
+              ->process_valid_acquire_request(
+                  it->source, it->count, it->result, it->ready);
+        else
+          dc->process_global_acquire_request(
+              it->source, it->count, it->result, it->ready);
+      }
       if (to_trigger.exists())
         Runtime::trigger_event(to_trigger);
     }
@@ -6023,6 +6045,16 @@ namespace Legion {
           dist_collectables.find(to_find);
       if (finder != dist_collectables.end())
         return finder->second;
+      // Parking cannot leak: after a granter relinquishes ownership there
+      // is no self-believing owner anywhere until the target adopts the
+      // transfer, only owners commit rounds, and replicas die only
+      // through commits -- so the sole ownership designate provably
+      // cannot die before this transfer arrives. Every entry parked here
+      // is therefore pre-birth, with a counted creation in flight that
+      // guarantees the registration which consumes it (the finding-F21
+      // investigation, retracted: see tla/downgrade/FINDINGS.md; the
+      // pending_collectables emptiness assert at shutdown is the
+      // tripwire for this invariant)
       // The instance is not here yet: park the transfer in the pending
       // collectable entry (making it if needed) for application at
       // registration, keeping only the freshest version (version gating
@@ -6036,6 +6068,43 @@ namespace Legion {
         pending.downgrade_lamport_clock = lamport_clock;
         pending.has_downgrade_update = true;
       }
+      return nullptr;
+    }
+
+    //--------------------------------------------------------------------------
+    DistributedCollectable* Runtime::find_or_park_remote_acquire(
+        DistributedID did, AddressSpaceID source, int count,
+        std::atomic<bool>* result, RtUserEvent ready, bool valid_kind,
+        bool& parked)
+    //--------------------------------------------------------------------------
+    {
+      const DistributedID to_find = LEGION_DISTRIBUTED_ID_FILTER(did);
+      AutoLock d_lock(distributed_collectable_lock);
+      lng::map<DistributedID, DistributedCollectable*>::const_iterator finder =
+          dist_collectables.find(to_find);
+      if (finder != dist_collectables.end())
+      {
+        // Same contract as weak_find_distributed_collectable
+        finder->second->add_base_resource_ref(RUNTIME_REF);
+        parked = false;
+        return finder->second;
+      }
+      // Only park on an EXISTING entry: an entry means a registration is
+      // provably on its way (the ordered reference channel delivered the
+      // ownership transfer that legitimized this chase before the chase
+      // itself, or a requester already holds the registration
+      // guarantee), so the parked request is always replayed. A DID with
+      // no entry is a genuinely collected object: the caller denies
+      std::map<DistributedID, PendingCollectable>::iterator pending_finder =
+          pending_collectables.find(to_find);
+      if (pending_finder == pending_collectables.end())
+      {
+        parked = false;
+        return nullptr;
+      }
+      pending_finder->second.pending_acquires.emplace_back(
+          PendingAcquireRequest{source, count, result, ready, valid_kind});
+      parked = true;
       return nullptr;
     }
 

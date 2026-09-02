@@ -328,14 +328,23 @@ namespace Legion {
         }
         current_owner = downgrade_owner;
       }
-      // Send the message to the downgrade owner to try to acquire the reference
+      // Send the message to the downgrade owner to try to acquire the
+      // reference. The chase forwards responder-side until it resolves,
+      // and every answer is FINAL: a grant packs a counted reference; a
+      // denial proves the downgrade committed (a genuinely downgraded
+      // replica, or a DID with neither an instance nor pending state,
+      // which only a committed collection can produce). The one transient
+      // the old code answered with a spurious deny -- a chase reaching a
+      // node whose instance is still in flight -- now parks on the
+      // pending-collectable entry and replays at registration (finding
+      // F19), so the requester never needs to wait on anything but this
+      // response.
       std::atomic<bool> result(false);
       const RtUserEvent ready = Runtime::create_rt_user_event();
       DistributedGlobalAcquireRequest rez;
       {
         RezCheck z(rez);
         rez.serialize(did);
-        rez.serialize(this);
         rez.serialize(local_space);
         rez.serialize(cnt);
         rez.serialize(&result);
@@ -414,6 +423,58 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void DistributedCollectable::process_global_acquire_request(
+        AddressSpaceID source, int count, std::atomic<bool>* result,
+        RtUserEvent ready)
+    //--------------------------------------------------------------------------
+    {
+      LamportClock lamport_clock = 0;
+      AddressSpaceID current_owner = local_space;
+      if (acquire_global_remote(current_owner, count, source, lamport_clock))
+      {
+        // Successfully acquired (packed) a global reference
+        if (source != local_space)
+        {
+          DistributedGlobalAcquireResponse rez;
+          {
+            RezCheck z2(rez);
+            rez.serialize(did);
+            rez.serialize(count);
+            rez.serialize(result);
+            rez.serialize(ready);
+            rez.serialize(lamport_clock);
+          }
+          rez.dispatch(source);
+        }
+        else
+        {
+          // Might have been sent back to ourself eventually
+          result->store(true);
+          Runtime::trigger_event(ready);
+        }
+      }
+      else if (current_owner != local_space)
+      {
+        // Not the owner anymore, so forward and keep chasing
+        DistributedGlobalAcquireRequest rez;
+        {
+          RezCheck z2(rez);
+          rez.serialize(did);
+          rez.serialize(source);
+          rez.serialize(count);
+          rez.serialize(result);
+          rez.serialize(ready);
+        }
+        rez.dispatch(current_owner);
+      }
+      else
+        // The replica here has genuinely committed its downgrade: the
+        // only legitimate denial (the requester validates it against
+        // its own replica's state)
+        Runtime::trigger_event(ready);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void DistributedGlobalAcquireRequest::handle(
         Deserializer& derez, AddressSpaceID)
     //--------------------------------------------------------------------------
@@ -421,8 +482,6 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      DistributedCollectable* remote;
-      derez.deserialize(remote);
       AddressSpaceID source;
       derez.deserialize(source);
       int count;
@@ -432,59 +491,25 @@ namespace Legion {
       RtUserEvent ready;
       derez.deserialize(ready);
 
-      DistributedCollectable* dc =
-          runtime->weak_find_distributed_collectable(did);
+      // Single pass, never blocks, never loops: find the instance (with
+      // a resource reference), or atomically park the chase on an
+      // EXISTING pending-collectable entry (an instance provably on its
+      // way, replayed at registration; if the entry is instead a stale
+      // one for a dead DID, the F21 liveness probe sweeps it and denies
+      // us). A DID with neither is a genuinely collected object: deny,
+      // which the requester validates against its own replica's state
+      // (finding F19: the old deny at any missing instance produced
+      // spurious acquire failures for instances still in flight)
+      bool parked = false;
+      DistributedCollectable* dc = runtime->find_or_park_remote_acquire(
+          did, source, count, result, ready, false /*valid kind*/, parked);
       if (dc != nullptr)
       {
-        LamportClock lamport_clock = 0;
-        AddressSpaceID current_owner = dc->local_space;
-        if (dc->acquire_global_remote(
-                current_owner, count, source, lamport_clock))
-        {
-          // Successfully acquired (packed) a global reference
-          if (source != dc->local_space)
-          {
-            DistributedGlobalAcquireResponse rez;
-            {
-              RezCheck z2(rez);
-              rez.serialize(remote);
-              rez.serialize(count);
-              rez.serialize(result);
-              rez.serialize(ready);
-              rez.serialize(lamport_clock);
-            }
-            rez.dispatch(source);
-          }
-          else
-          {
-            // Might have been sent back to ourself eventually
-            result->store(true);
-            Runtime::trigger_event(ready);
-          }
-        }
-        else if (current_owner != dc->local_space)
-        {
-          // Not the owner anymore, so forward and keep chasing
-          DistributedGlobalAcquireRequest rez;
-          {
-            RezCheck z2(rez);
-            rez.serialize(did);
-            rez.serialize(remote);
-            rez.serialize(source);
-            rez.serialize(count);
-            rez.serialize(result);
-            rez.serialize(ready);
-          }
-          rez.dispatch(current_owner);
-        }
-        else
-          // Failed so trigger the event
-          Runtime::trigger_event(ready);
+        dc->process_global_acquire_request(source, count, result, ready);
         if (dc->remove_base_resource_ref(RUNTIME_REF))
           delete dc;
       }
-      else
-        // Failed so trigger the event
+      else if (!parked)
         Runtime::trigger_event(ready);
     }
 
@@ -494,8 +519,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      DistributedCollectable* local;
-      derez.deserialize(local);
+      DistributedID did;
+      derez.deserialize(did);
       int count;
       derez.deserialize(count);
       std::atomic<bool>* result;
@@ -503,6 +528,8 @@ namespace Legion {
       RtUserEvent ready;
       derez.deserialize(ready);
 
+      DistributedCollectable* local =
+          runtime->find_distributed_collectable(did);
       // Just add the valid reference for now
       local->add_gc_reference(count);
       // Unpack the global reference added by acquire_global_remote
@@ -2227,14 +2254,15 @@ namespace Legion {
         }
         current_owner = downgrade_owner;
       }
-      // Send the message to the downgrade owner to try to acquire the reference
+      // Send the message to the downgrade owner to try to acquire the
+      // reference; see acquire_global for why every answer is final and
+      // the requester only ever waits on this response (finding F19)
       std::atomic<bool> result(false);
       const RtUserEvent ready = Runtime::create_rt_user_event();
       DistributedValidAcquireRequest rez;
       {
         RezCheck z(rez);
         rez.serialize(did);
-        rez.serialize(this);
         rez.serialize(local_space);
         rez.serialize(cnt);
         rez.serialize(&result);
@@ -2306,6 +2334,58 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ValidDistributedCollectable::process_valid_acquire_request(
+        AddressSpaceID source, int count, std::atomic<bool>* result,
+        RtUserEvent ready)
+    //--------------------------------------------------------------------------
+    {
+      LamportClock lamport_clock = 0;
+      AddressSpaceID current_owner = local_space;
+      if (acquire_valid_remote(current_owner, count, source, lamport_clock))
+      {
+        if (source != local_space)
+        {
+          // Successfully acquired (packed) a valid reference
+          DistributedValidAcquireResponse rez;
+          {
+            RezCheck z2(rez);
+            rez.serialize(did);
+            rez.serialize(count);
+            rez.serialize(result);
+            rez.serialize(ready);
+            rez.serialize(lamport_clock);
+          }
+          rez.dispatch(source);
+        }
+        else
+        {
+          // Might have been sent back to ourself eventually
+          result->store(true);
+          Runtime::trigger_event(ready);
+        }
+      }
+      else if (current_owner != local_space)
+      {
+        // Not the owner anymore, so forward and keep chasing
+        DistributedValidAcquireRequest rez;
+        {
+          RezCheck z2(rez);
+          rez.serialize(did);
+          rez.serialize(source);
+          rez.serialize(count);
+          rez.serialize(result);
+          rez.serialize(ready);
+        }
+        rez.dispatch(current_owner);
+      }
+      else
+        // The replica here has genuinely left the valid level: the only
+        // legitimate denial (the requester validates it against its own
+        // replica's state)
+        Runtime::trigger_event(ready);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void DistributedValidAcquireRequest::handle(
         Deserializer& derez, AddressSpaceID)
     //--------------------------------------------------------------------------
@@ -2324,60 +2404,21 @@ namespace Legion {
       RtUserEvent ready;
       derez.deserialize(ready);
 
+      // Single pass, never blocks, never loops; see the global twin and
+      // finding F19 for the full rationale
+      bool parked = false;
       ValidDistributedCollectable* dc =
           static_cast<ValidDistributedCollectable*>(
-              runtime->weak_find_distributed_collectable(did));
+              runtime->find_or_park_remote_acquire(
+                  did, source, count, result, ready, true /*valid kind*/,
+                  parked));
       if (dc != nullptr)
       {
-        LamportClock lamport_clock = 0;
-        AddressSpaceID current_owner = dc->local_space;
-        if (dc->acquire_valid_remote(
-                current_owner, count, source, lamport_clock))
-        {
-          if (source != dc->local_space)
-          {
-            // Successfully acquired (packed) a valid reference
-            DistributedValidAcquireResponse rez;
-            {
-              RezCheck z2(rez);
-              rez.serialize(remote);
-              rez.serialize(count);
-              rez.serialize(result);
-              rez.serialize(ready);
-              rez.serialize(lamport_clock);
-            }
-            rez.dispatch(source);
-          }
-          else
-          {
-            // Might have been sent back to ourself eventually
-            result->store(true);
-            Runtime::trigger_event(ready);
-          }
-        }
-        else if (current_owner != dc->local_space)
-        {
-          // Not the owner anymore, so forward and keep chasing
-          DistributedValidAcquireRequest rez;
-          {
-            RezCheck z2(rez);
-            rez.serialize(did);
-            rez.serialize(remote);
-            rez.serialize(source);
-            rez.serialize(count);
-            rez.serialize(result);
-            rez.serialize(ready);
-          }
-          rez.dispatch(current_owner);
-        }
-        else
-          // Failed so trigger the event
-          Runtime::trigger_event(ready);
+        dc->process_valid_acquire_request(source, count, result, ready);
         if (dc->remove_base_resource_ref(RUNTIME_REF))
           delete dc;
       }
-      else
-        // Failed so trigger the event
+      else if (!parked)
         Runtime::trigger_event(ready);
     }
 
@@ -2387,8 +2428,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      ValidDistributedCollectable* local;
-      derez.deserialize(local);
+      DistributedID did;
+      derez.deserialize(did);
       int count;
       derez.deserialize(count);
       std::atomic<bool>* result;
@@ -2396,6 +2437,9 @@ namespace Legion {
       RtUserEvent ready;
       derez.deserialize(ready);
 
+      ValidDistributedCollectable* local =
+          static_cast<ValidDistributedCollectable*>(
+              runtime->find_distributed_collectable(did));
       // Just add the valid reference for now
       local->add_valid_reference(count);
       // Unpack the valid reference packed by acquire_valid_remote

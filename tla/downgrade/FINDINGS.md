@@ -843,3 +843,356 @@ optional freshest downgrade transfer}. The park creates the pending
 entry if absent (restoring the invariant parked => pending by
 construction), registration consumes both with a single lookup on the
 hot path, and the transfer's lifetime is exactly the pending entry's.
+
+## F19 — Fallible acquires racing their own in-flight packed reference
+## (fuzzer aborts at expression.cc:269, 2026-08-31)
+
+Two fuzzer crashes (ViewFindCopyPreMessage and
+IndexPartitionRemoteInterferenceRequest handlers) aborting in
+IndexSpaceExpression::unpack_expression when try_add_live_reference
+returned false. A second LLM diagnosed a downgrade-tally violation
+("the owner downgraded despite a packed in-flight reference");
+REJECTED: the counted in-flight reference makes any commit
+arithmetically impossible (exhaustively verified), and a prior commit
+contradicts the pack-side is_valid() assert. The actual cause:
+acquire_global has a TRANSIENT failure mode -- at PENDING_LOCAL it
+launches a single-shot ownership chase, and a chase hop forwarded to a
+node whose instance has not materialized yet (ownership transfers name
+the new owner before its instance registers -- the F18 topology) is
+denied at the weak_find (gc.cc GlobalAcquireRequest handler's null
+branch). The object is fully alive; the unconditional std::abort
+converts a legitimate transient into a crash (release-reachable, not
+just debug; debug prevalence from timing plus the debug-only
+PENDING_LOCAL pack fallback's extra acquire traffic).
+
+The deeper pattern: performing a FALLIBLE acquire while holding, in
+the same message, the not-yet-credited counted reference that proves
+the object alive and would make the acquire infallible.
+
+FIXES (uncommitted, master; the first expression fix was RETRACTED on
+Mike's review):
+- unpack_expression (all three wire-form branches): the original
+  credit-the-reference-first reorder was UNSAFE -- unpack_global_ref
+  is COUNT-ONLY (received_global_references += cnt, no held
+  reference), so crediting first balances the tallies and unpins the
+  object, opening a window where a round can commit before the live
+  reference is taken. The original acquire-before-credit order was the
+  deliberately safe design (the uncredited receipt keeps every round
+  from committing); its only defect was the FALLIBLE acquire. Final
+  fix: new unconditional add_live_reference()
+  (add_base_gc_ref(LIVE_EXPR_REF) + record_live_expression) on
+  IndexSpaceOperation and IndexSpaceNode, called in the ORIGINAL order
+  before unpack_global_ref -- the uncredited in-flight receipt is the
+  cover making the unconditional add legal at any global state
+  (covered promotion per F17), with no failure mode.
+- future.cc debug handlers (FutureResultMessage, FutureSizeMessage,
+  FutureSubscription): the debug-only
+  legion_no_skip_assert(check_global_and_increment(...)) workaround
+  replaced with an UNCONDITIONAL covered add_base_gc_ref: the message's
+  counted reference is the cover, making the add legal at any global
+  state (covered promotion per F17), where the acquire could be
+  transiently denied.
+
+AUDIT of remaining fallible-acquire sites: expression caches
+(expression.inl:1171/1255, the operation trie lookups) handle false
+gracefully by construction; abort-on-false sites at freshly created
+objects (InternalExpression ctor, trie creation) and API entries
+(runtime.cc union/intersection) are covered by creator/caller-held
+references making the gc_references > 0 piggyback infallible; the
+instance builder handles false as an error path. No other instances of
+the acquire-before-crediting pattern found.
+
+### F19 ROOT FIX (2026-09-01, Mike's ruling): the acquire contract
+Mike's design ruling: a spurious acquire failure is a bug in the
+ACQUIRE PROTOCOL itself. Contract: acquire returns false IFF the
+object has actually committed its downgrade; every transient (chase
+hop at a not-yet-materialized instance, stale ownership pointer,
+mid-transfer state) must be absorbed by the protocol.
+Fix (uncommitted, master): the F18 PendingCollectable machinery
+extended with a parked-acquire list. Both acquire request handlers
+(global and valid) now loop { weak_find -> process | park }: a chase
+arriving at a node with no instance parks the request fields on the
+pending entry (atomically rechecking registration under the lock;
+retry on race) instead of denying. register_distributed_collectable
+replays parked acquires AFTER applying the parked ownership transfer,
+so replays chase fresh ownership. The only deny left is at a replica
+that is genuinely LOCAL/DELETED -- the true-death proof. Liveness:
+parking only happens at nodes named as transfer candidates, whose
+creating message is guaranteed in flight (the F18 invariant), so
+registration and replay always occur and the requester's wait always
+resolves. The handler bodies were factored into
+process_remote_{global,valid}_acquire, shared by handler and replay.
+Under the strengthened contract the F19 call-site changes (covered
+unconditional add_live_reference at unpack sites, covered adds in the
+debug future handlers) become optimizations rather than correctness
+requirements: they skip the ownership chase entirely when unpacking.
+Kept, but revertible independently if the original try+abort tripwires
+are preferred (they are correct again under this contract).
+
+F19 addendum (2026-09-01): per Mike's review the call-site changes were
+REVERTED (expression.{h,cc}, index.{h,cc}, future.cc back to their
+original try_add + abort forms). Under the acquire contract those
+call sites were correct all along; the aborts are legitimate tripwires
+again. The fix is confined to the protocol: garbage_collection.{h,cc}
+and runtime.{h,cc}.
+Why the model missed it: RecvAcq faithfully modeled the Absent-target
+deny (final ELSE branch -> DenyMsg) and RecvDeny simply discards -- the
+spurious deny was IN the model, unflagged, because no property stated
+the acquire contract. Denial was treated as an allowed outcome; the
+requester-side consequence of a deny (the callers' aborts) was outside
+the modeled scope. Spec-scope gap, not a fidelity gap.
+Model update TODO (proposed): (1) state the contract as an invariant --
+a DenyMsg for level l may exist only if the object's l-level has
+genuinely committed its downgrade; (2) make RecvAcq at an Absent target
+NOT enabled (message parks in msgs until registration), matching
+park-and-replay; (3) drop the hop counter (model artifact -- the impl
+has no hop limit; hop-exhaustion denies are spurious by construction).
+Then rerun the flat exhaustive config and the tree probes.
+
+### F19 MODEL CLOSURE (2026-09-01): the acquire contract in Downgrade.tla
+Why the model missed the bug originally: RecvAcq faithfully modeled the
+Absent-target deny and RecvDeny discarded it -- the spurious deny was in
+the model, unflagged, because no property stated the acquire contract
+(spec-scope gap, not fidelity gap).
+Spec changes (Downgrade.tla, uncommitted):
+- New constant AcquireParking. The toggle is SURGICAL: TRUE (park-and-
+  replay fix) makes RecvAcq undeliverable at an Absent target -- the
+  message parks in msgs and replays when the replica registers; FALSE
+  (master) answers deny. Everything else identical in both modes:
+  grant at a live self-believing owner, deny ONLY at a replica genuinely
+  below the requested level (BelowLevel -- the object committed there),
+  forward at a live non-owner, and model-bound truncations (pack budget,
+  hop budget; the impl chase is unbounded) retire the message with NO
+  answer, so no bound artifact ever reaches the wire. NOTE: master mode
+  previously answered deny on budget/hop exhaustion too; those denies
+  were consequence-free (no invariant read them) but produced a
+  misleading shortest counterexample, hence the surgical restructure.
+- DenyMsg now carries the level.
+- New invariant AcquireContract: while a deny for level l is in flight,
+  the l-level death must be globally justified (the stable post-commit
+  facts of ValidDeadClean / DeadOwnerClean at that level).
+- New property AcqResolved == <>[](no acq messages): every chase must
+  eventually resolve. A chase parked forever is a requester thread
+  waiting forever on its ready event in the impl -- invisible to
+  EventualCollection, whose all-Absent disjunct does not require the
+  network to drain.
+- All configs define AcquireParking (TRUE everywhere except
+  DowngradeOld/DowngradeOldLive); AcquireContract added to the new-mode
+  safety configs. New configs: BisectF19.cfg, ProbeAcqResolved.cfg.
+Verdicts (local, 2026-09-01):
+- DowngradeDegen (fix mode): PASS, 948,080 generated / 234,430 distinct
+  / depth 38 (up from 224,577: parked chases persist in msgs).
+- BisectF19 (master mode): AcquireContract VIOLATED, 14-state trace =
+  the fuzzer bug exactly: owner n0 packs a ref to n2 mid-round
+  (n2 Absent, creation in flight), the failed round transfers ownership
+  to n2, n1's V-acquire chase forwards n0 -> n2, hits Absent, deny
+  answered while n0 holds a live V reference. expression.cc:269,
+  machine-checked.
+- ProbeAcqResolved (fix mode): AcqResolved VIOLATED -- F20, see below.
+
+### F20 (NEW, 2026-09-01): park-and-replay can park forever -- a
+### requester hang in the F19 fix as implemented
+Machine-checked by ProbeAcqResolved: n2 (pending) starts a chase toward
+its believed owner n1; the rounds commit; n1 goes Local and COLLECTS
+before the chase arrives; the chase parks at the Absent node and nothing
+ever registers that DID again. In the impl: the chase lands after
+unregister_distributed_collectable removed the DID, weak_find returns
+null, park_pending_acquire parks the request on a PendingCollectable
+entry whose registration never comes, and the requester waits forever on
+its ready event (plus the entry leaks). weak_find-null is AMBIGUOUS
+between not-yet-materialized (park correct, F19) and dead-and-collected
+(deny correct, master). Master's deny was right for the second case and
+wrong for the first; the park is right for the first and hangs on the
+second. The chase can arrive post-deletion because the success wave
+(owner -> requester) and the chase (requester -> owner) travel opposite
+directions -- no channel ordering protects them.
+STATUS: OPEN design question -- blocks committing the park-and-replay
+form of the F19 impl fix. Candidate redesign (requester-side finality):
+the responder never parks; weak_find-null answers deny as before, but a
+deny is only ADVISORY. The requester treats an acquire as failed only
+when its OWN replica has committed the downgrade at the requested level
+(it received the commit proof itself); on an advisory deny while still
+pending, it parks the retry locally keyed on its replica's next protocol
+event (success -> fail legitimately; rollback/update -> re-chase with a
+refreshed owner belief; a new round's request also refreshes beliefs).
+Termination: the verified protocol guarantees every pending replica
+eventually receives its round's resolution. This needs no cross-node
+parking for acquires at all (the F18 PendingCollectable parking for
+downgrade UPDATES is unaffected -- updates only target guaranteed-to-
+register nodes). To be modeled as a third RecvAcq/RecvDeny mode before
+implementing.
+
+F20 addendum (2026-09-01, Mike): the park-and-replay impl structure is
+ALSO illegal Realm code independent of the protocol hole. The
+while(true) find/park retry loop in the acquire handlers can spin
+without ever blocking on an event: weak_find returns null for a
+present-but-dying object (the resurrection guard fails the resource-ref
+add), park's under-lock recheck sees the DID still present and returns
+false, and the loop retries -- while the deleting meta-task that would
+unregister the DID may need the same processor. Realm does no time
+slicing; tasks must make forward progress or preempt by blocking on an
+event. Ruling: alternative structure required.
+Three-mode model restructure: AcquireParking replaced by AcquireMode in
+{"deny", "park", "requester"} (see the constant's comment). "requester"
+= requester-side finality; denies are advisory everywhere (including at
+model bound truncations, which no longer silently retire in this mode),
+finality decided by the requester's own replica (fail messages audit it
+via FinalFail in AcquireContract), budget-bounded re-chase, then the
+retry parks on the requester replica's own next protocol event.
+AcqResolved extended to require acq/deny/fail all drain.
+
+F20 candidate verdict (2026-09-01 03:4x local): ProbeRequesterAcqSmoke
+(requester mode at the EXACT budgets where park mode violated AcqResolved:
+MaxPacks 1, MaxAcqs 1, MaxRounds 8) PASS EXHAUSTIVE -- AcquireContract
+and AcqResolved both hold; 7,632,120 generated / 1,791,246 distinct /
+queue drained. Requester-side finality resolves the F20 hang and keeps
+the acquire contract at this scope. Deeper budgets (re-chase depth 2)
+still running locally + submitted to sapling (submit_f19.sh).
+
+### F21 (NEW, 2026-09-01): stale ownership updates park forever at
+### collected DIDs (LATENT IN THE COMMITTED F18 CODE)
+Found by the first hybrid-mode smoke (AcqResolved violation, 21-state
+trace): a failed round sends an ownership update to a then-live node;
+the update's delivery is slow (it rides the ordered REFERENCE channel,
+but the target's subsequent life and death involve only default-channel
+traffic, so nothing forces earlier delivery); the target becomes owner
+by another path (here the hairy-registration grant), commits the final
+round, dies, and collects. The stale update then arrives at the dead
+DID, weak_find returns null, and find_or_park_downgrade_update parks it
+in pending_collectables FOREVER -- today a silent entry leak in the
+committed F18 machinery; under naive entry-gated chase parking it
+upgrades to a requester hang. STATUS: leak acknowledged, fix TBD
+(sweep or tombstone question for Mike); the F19 design below makes the
+acquire path immune to it.
+
+F19 FINAL DESIGN (hybrid + abandonment), model-cleared 2026-09-01:
+- Responder, single pass under the collectable lock (Realm-legal, no
+  loop): instance found -> grant at live owner / forward at live
+  non-owner / deny at genuinely downgraded replica; no instance but a
+  pending_collectables entry -> park the chase on the entry (replayed at
+  registration; the ordered REFERENCE channel guarantees the chase's
+  legitimizing ownership update was processed first, so a fresh-transfer
+  chase always finds either the instance or the parked update);
+  no instance and no entry -> deny.
+- Requester: refcounted acquire block; the DC keeps a waiter list under
+  gc_lock; every local protocol mutation (success, update, rollback,
+  covered promotion) triggers waiting blocks exactly once. The requester
+  fails ONLY when its own replica has committed the level; on any wake
+  it recheck-loops (each iteration ends in return or an event wait).
+  Once its replica carries the commit proof it abandons any outstanding
+  chase (a racing late grant is returned by the response handler; a
+  chase parked at a dead DID leaks with the F21 entry but hangs nobody).
+- Model: AbandonAcq action (hybrid mode) encodes the abandonment.
+Verdicts: DowngradeDegen (hybrid) PASS; ProbeHybridAcqSmoke PASS
+EXHAUSTIVE (7,804,362 / 1,791,246 distinct; AcquireContract +
+AcqResolved) at the exact budgets where park mode hangs (F20) and pure
+requester mode has the timeliness hole (analytic, not machine-checked:
+a chase denied at a quiet pre-birth owner waits on protocol traffic
+that never comes while the object lives -- AcqResolved cannot see it
+because TLC's fairness eventually drains the owner's refs).
+
+F19/F21 IMPLEMENTATION (2026-09-01 overnight, uncommitted on master):
+- managers/message.h: DISTRIBUTED_LIVENESS_PROBE_{REQUEST,RESPONSE}
+  (default unordered channel; the request handler may block on events).
+- kernel/garbage_collection.h/.cc:
+  * acquire_global / acquire_valid are event-paced retry loops: local
+    fast path; own-replica commit proof (LOCAL/DELETED, resp. below
+    valid) is the ONLY failure; chase the believed owner; a denial is
+    advisory -- wait on the replica's downgrade progress event, then
+    re-evaluate (grant after rollback, fail after own commit, re-chase
+    a refreshed belief). Every wait is an event wait.
+  * downgrade_progress_event: minted on demand under gc_lock
+    (get_downgrade_progress_event), triggered-and-cleared
+    (notify_downgrade_progress) at every protocol mutation: the four
+    PENDING_LOCAL->GLOBAL promotions (covered adds + update rollback),
+    the three PENDING_GLOBAL->VALID promotions, both perform_downgrades,
+    valid update catch-up/rollback, request-adoption, response-transfer,
+    restart-transfer, apply_valid_stamp promotion.
+  * Both acquire request handlers: single pass, never blocks, never
+    loops: find_or_park_remote_acquire returns the instance (resource
+    ref added under the runtime lock), parks the chase on an EXISTING
+    pending-collectable entry, or reports neither (deny). Post-find
+    bodies factored into process_remote_{global,valid}_acquire, shared
+    with the registration replay.
+  * wait_until_globally_stable + the probe handlers: the owner space
+    defers its verdict (event waits, unordered channel) while
+    PENDING_LOCAL; PENDING_GLOBAL is already a stable ALIVE at the
+    global level. DEAD -> prune_stale_pending_collectable at the
+    prober.
+- kernel/runtime.h/.cc:
+  * PendingCollectable grows pending_acquires; registration replays
+    them AFTER the parked ownership transfer, BEFORE the registered
+    event triggers.
+  * find_or_park_downgrade_update reports when it parked so the update
+    handler sends the liveness probe (self-owner-space case prunes
+    directly: an update for a local DID with no local instance means
+    created-lived-died-deleted here).
+  * prune_stale_pending_collectable erases entries holding only parked
+    protocol state and denies their parked acquires; entries with a
+    registered waiter or a requested allocation are a pre-existing
+    caller bug -- debug tripwire, left alone in release.
+Liveness inventory (every requester ready is triggered): grant; deny at
+a found dead replica; deny at a DID with no entry; parked entry ->
+registration replay (fresh) or probe sweep (stale). The requester's
+post-deny progress wait is guaranteed by its own success delivery.
+
+### F21 RETRACTED AS AN IMPLEMENTATION BUG (2026-09-01, after Mike's
+### review of the probe fix): a model fidelity artifact
+Mike proposed replacing the probe with a local guard reference held by
+a node that learns its own ownership from the registration handshake.
+Checking that premise against the code: THE IMPLEMENTATION'S
+REGISTRATION RESPONSE DOES NOT CARRY OWNERSHIP AT ALL --
+process_registration_response (gc.cc:897) folds only the F16 clock.
+The (owner, version) payload and its adoption existed only in the
+model's RegRespMsg/RecvRegResp. The F21 trace requires exactly that
+duplicate ownership carrier: without it, no update can outlive its
+target, because after a granter relinquishes there is no self-believing
+owner anywhere until the target adopts (OwnerUnique), only owners
+commit rounds, and replicas die only through commits -- so the sole
+ownership designate provably cannot die before its update arrives, and
+every parked update is pre-birth with a counted creation in flight.
+Machine-checked bisection: new constant RegRespOwnership (TRUE = model
+as previously verified; FALSE = impl-faithful clock-only handshake).
+BisectF21Fidelity (FALSE, probe OFF = committed F18 exactly): UpdsDrain
+PASSES exhaustively -- no leak. FidelityLive (EventualCollection) and
+FidelityAcq (AcquireContract + AcqResolved + UpdsDrain, hybrid) also
+PASS with FALSE: the ownership payload was not load-bearing anywhere.
+CONSEQUENCES:
+- F21 is not a bug in committed code; the F21-DEMO.md claim is
+  retracted (document updated).
+- The liveness probe infrastructure is unnecessary: to be removed from
+  the F19 prototype. The F19 acquire inventory stays closed without the
+  sweep: parked entries are always pre-birth, so parked acquires always
+  replay at registration.
+- Mike's guard reference is also unnecessary TODAY, but is exactly the
+  right accompaniment if the registration response is ever taught to
+  carry ownership (a fresher-belief optimization the model shows is
+  safe WITH adoption); recorded here for that future.
+- Model default going forward: RegRespOwnership = FALSE (impl-faithful)
+  for new verification; existing configs keep TRUE where their recorded
+  verdicts were established with it. Fidelity lesson: an invented
+  message payload manufactured a "committed-code" finding; carrier
+  payloads must be checked against the impl before being modeled.
+
+F19 FINAL FORM (2026-09-01, Mike's simplification): denies are FINAL at
+the requester; the downgrade progress event machinery is deleted. With
+park-on-entry absorbing the pre-birth transient (the actual F19 bug)
+and the ownership-uniqueness argument (no self-believing owner exists
+between relinquish and adoption; only owners commit; replicas die only
+through commits), every remaining deny is provably genuine: a
+downgraded replica, or a DID with neither instance nor pending state,
+both of which only a committed collection can produce. The requester
+therefore returns to master's single-shot shape -- its only wait is the
+response to its own chase -- and the local backstop (progress event, 15
+notification sites, retry loops) defended against spurious denies that
+can no longer occur. Model: AcquireMode "final" (park-on-entry
+responder + final denies; model-bound truncations retire silently so no
+bound artifact mints a final deny). ProbeFinalAcqSmoke (impl-faithful
+RegRespOwnership FALSE): PASS EXHAUSTIVE, 3,346,140 generated /
+886,446 distinct; AcquireContract + AcqResolved + UpdsDrain.
+Remaining impl diff (uncommitted, master): garbage_collection.{h,cc} --
+handler single-pass with find_or_park_remote_acquire + factored
+process_remote_{global,valid}_acquire; runtime.{h,cc} --
+PendingAcquireRequest parking, registration replay, the
+pending_collectables-empty shutdown tripwire. No new messages, no new
+events, no requester-side loops.

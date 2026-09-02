@@ -1035,6 +1035,17 @@ namespace Legion {
       DistributedCollectable* find_or_park_downgrade_update(
           DistributedID did, unsigned state, uint64_t owner_version,
           LamportClock lamport_clock);
+      // Return the registered instance (with a resource reference), or
+      // atomically park the remote acquire request on an EXISTING
+      // pending-collectable entry for replay at registration (parked is
+      // set), or report that neither exists (nullptr, not parked): the
+      // caller must then deny -- a DID with neither an instance nor
+      // pending state here is a genuinely collected object (finding F19;
+      // never blocks, never loops)
+      DistributedCollectable* find_or_park_remote_acquire(
+          DistributedID did, AddressSpaceID source, int count,
+          std::atomic<bool>* result, RtUserEvent ready, bool valid_kind,
+          bool& parked);
       DistributedCollectable* weak_find_distributed_collectable(
           DistributedID did);
       template<typename T>
@@ -1475,6 +1486,17 @@ namespace Legion {
       // A distributed collectable that has been referenced here but whose
       // instance has not registered yet. Also carries any downgrade
       // ownership transfer that raced ahead of the instance's creation
+      // A remote acquire chase parked on a pending collectable for
+      // replay at registration (finding F19). The pointers are opaque
+      // requester-side addresses that travel back in the response
+      struct PendingAcquireRequest {
+      public:
+        AddressSpaceID source = 0;
+        int count = 0;
+        std::atomic<bool>* result = nullptr;
+        RtUserEvent ready;
+        bool valid_kind = false;
+      };
       struct PendingCollectable {
       public:
         DistributedCollectable* pending = nullptr;
@@ -1483,6 +1505,7 @@ namespace Legion {
         uint64_t downgrade_owner_version = 0;
         LamportClock downgrade_lamport_clock = 0;
         bool has_downgrade_update = false;
+        std::vector<PendingAcquireRequest> pending_acquires;
       };
       std::map<DistributedID, PendingCollectable> pending_collectables;
     protected:
