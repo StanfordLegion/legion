@@ -181,3 +181,62 @@ requester routing, registration semantics), degenerate-exact against
 Stage 2, F13/F14/F15/F16 found+fixed+verified, probes certified,
 liveness verified at tree scope, historical matrix preserved under the
 RegClockBump=FALSE policy.
+
+## F19/F20/F21 acquire-protocol campaign (overnight 2026-08-31 -> 09-01)
+Final-spec local verdicts (AcquireMode x StaleUpdateProbe; all small
+configs, metadirs cleaned -- deep runs belong on sapling):
+| Config | Mode | Expectation | Verdict |
+|---|---|---|---|
+| BisectF19 | deny (master) | spurious deny | VIOLATED AcquireContract (14 states) |
+| ProbeAcqResolved | park | F20 requester hang | VIOLATED AcqResolved |
+| BisectF21 | hybrid, probe OFF (committed F18) | entry leak | VIOLATED UpdsDrain (22 states) |
+| ProbeRequesterAcqSmoke | requester | pass | PASS exhaustive 1,791,246 distinct |
+| ProbeHybridAcqSmoke | hybrid, probe ON | pass | PASS exhaustive 1,791,246 distinct (8,010,890 gen; AcquireContract + AcqResolved + UpdsDrain) |
+| DowngradeDegen | hybrid, probe ON | pass | PASS 78,094 distinct |
+| DowngradeDegenBump | hybrid, probe ON | pass | PASS |
+Sapling overnight batch (submitted by Mike ~04:00) runs the PRE-probe
+hybrid spec: DowngradeNew/4/Big, Tree{Smoke,4,Mid}, DowngradeNewLive,
+ProbeHybridAcq, ProbeRequesterAcq. A follow-up batch with the probe
+spec (this repo's tla/downgrade, already staged in sapling/) is
+recommended for the deep F21 configs.
+Implementation (uncommitted, master): see FINDINGS F19/F21
+IMPLEMENTATION record. Full runtime rebuild clean (0 warnings);
+test/lightweight passes (10K tasks, clean shutdown).
+
+## Sapling batch 1 (hybrid mode + model-only regresp adoption),
+## jobs 77920-77928, submitted 2026-09-01 ~04:00, adjudicated ~13:00
+| Job | Config | Verdict |
+|---|---|---|
+| 77920 | DowngradeNew (flat exhaustive + AcquireContract) | PASS exhaustive, 2,555,203,454 generated |
+| 77921 | Downgrade4 | PASS exhaustive, 389,449,597 generated |
+| 77922 | DowngradeBig | running clean @ 6.96B gen / 1.51B distinct |
+| 77923 | DowngradeTreeSmoke | running clean @ 5.71B gen / 1.27B distinct |
+| 77924 | DowngradeTree4 | running clean @ 5.69B gen / 1.28B distinct |
+| 77925 | DowngradeTreeMid | running clean @ 6.23B gen / 1.31B distinct |
+| 77926 | DowngradeNewLive (EventualCollection) | PASS exhaustive, 7,804,362 generated |
+| 77927 | ProbeHybridAcq (contract+drain, depth 2) | PASS, 177,969,351 generated |
+| 77928 | ProbeRequesterAcq (requester mode, depth 2) | PASS, 167,652,139 generated |
+Caveat: this batch predates the RegRespOwnership fidelity finding and
+the final-deny design; it verifies the hybrid design under the model-
+only handshake adoption. Batch 2 (impl-faithful "final" mode, submitted
+2026-09-01 ~13:00) is the design-of-record verification.
+
+## Sapling batch 2 (DESIGN OF RECORD: AcquireMode "final" +
+## RegRespOwnership FALSE), jobs 77929-77937, adjudicated 2026-09-02
+| Job | Config | Verdict |
+|---|---|---|
+| 77929 | DowngradeNew (flat exhaustive + AcquireContract) | PASS EXHAUSTIVE, 1,564,052,600 gen / 315,750,424 distinct, depth 50 |
+| 77930 | Downgrade4 | PASS EXHAUSTIVE, 254,024,782 gen / 55,235,878 distinct |
+| 77931 | DowngradeBig | bounded-clean at 24h: 18.67B gen / 4.02B distinct |
+| 77932 | DowngradeTreeSmoke | bounded-clean at 24h: 16.33B gen / 3.49B distinct |
+| 77933 | DowngradeTree4 | bounded-clean at 24h: 15.38B gen / 3.38B distinct |
+| 77934 | DowngradeTreeMid | bounded-clean at 24h: 16.47B gen / 3.47B distinct |
+| 77935 | DowngradeNewLive (EventualCollection) | PASS EXHAUSTIVE, 3,346,140 gen / 886,446 distinct |
+| 77936 | DowngradeTreeLive | PASS EXHAUSTIVE, 102,928 gen / 34,584 distinct |
+| 77937 | ProbeFinalAcq (AcquireContract + AcqResolved + UpdsDrain, chase depth 2) | PASS EXHAUSTIVE, 70,889,710 gen / 15,877,097 distinct |
+Zero violations across both batches. Batch-1 stragglers (77922-77925,
+hybrid mode) ended bounded-clean at 5.7-7.0B gen / 1.27-1.51B distinct.
+The final-deny design is verified at the campaign's full scope:
+exhaustive flat safety with the acquire contract, exhaustive flat and
+tree liveness, exhaustive deep acquire probes, and multi-billion-state
+bounded-clean tree/big-budget safety.

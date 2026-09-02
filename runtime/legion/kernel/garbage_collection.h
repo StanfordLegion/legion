@@ -328,6 +328,9 @@ namespace Legion {
       void unregister_collectable(std::set<RtEvent>& done_events);
     public:
       void send_remote_registration(void);
+      void process_global_acquire_request(
+          AddressSpaceID source, int count, std::atomic<bool>* result,
+          RtUserEvent ready);
     protected:
       bool can_delete(AutoLock& gc);
       virtual bool can_downgrade(void) const;
@@ -477,6 +480,9 @@ namespace Legion {
       bool is_valid(void) const;
       bool check_valid_and_increment(ReferenceSource source, int cnt = 1);
       bool check_valid_and_increment(DistributedID source, int cnt = 1);
+      void process_valid_acquire_request(
+          AddressSpaceID source, int count, std::atomic<bool>* result,
+          RtUserEvent ready);
       friend class DistributedValidAcquireRequest;
       friend class DistributedValidAcquireResponse;
 #ifndef LEGION_DEBUG_GC

@@ -62,8 +62,76 @@ CONSTANTS
   RegHandshake,        \* registration returns (owner,version) + nudge
   CoveredByHandle,     \* by-handle responses counted + pre-registered
   FlagVeto,            \* unpack mid-round parks a flag; every ready vote refuses
-  CatchUp              \* PENDING_GLOBAL applies its downgrade on a G-round
+  CatchUp,             \* PENDING_GLOBAL applies its downgrade on a G-round
                        \* request (commit proof); old mode: any valid state
+  RegRespOwnership,    \* FIDELITY BISECTION (2026-09-01): TRUE = the model as
+                       \* verified so far, where the registration response
+                       \* carries (owner, version) and the registrant adopts.
+                       \* THE IMPLEMENTATION DOES NOT DO THIS: its response
+                       \* carries only the F16 clock (gc.cc
+                       \* process_registration_response). FALSE = impl-
+                       \* faithful clock-only handshake. The F21 stale-update
+                       \* leak trace rides the TRUE-only duplicate ownership
+                       \* carrier; if FALSE makes UpdsDrain pass, F21 is a
+                       \* model artifact, unreachable in the implementation
+  StaleUpdateProbe,    \* F21 fix: parking a downgrade update for an absent
+                       \* instance sends a liveness probe to the DID's owner
+                       \* space, whose replica is provably the last to die
+                       \* (DeadOwnerClean). A DEAD verdict (owner-space
+                       \* replica Local/Absent) erases the parked entry; the
+                       \* impl defers the verdict at a PENDING owner-space
+                       \* replica until its round resolves, so the verdict is
+                       \* computed at a stable state (modeled by the action's
+                       \* enabling condition). ALIVE verdicts are safe to
+                       \* ignore: entry parked + object alive implies the
+                       \* target's creation is a counted pack in flight, so
+                       \* registration consumes the entry. FALSE = master +
+                       \* F18 as committed: the entry leaks forever
+  AcquireMode          \* F19 acquire contract (ruling 2026-08-31): an acquire
+                       \* may fail only if the object actually committed its
+                       \* downgrade at that level. Three structures:
+                       \* "deny"      = master: an Absent chase target answers
+                       \*               deny, and the deny is FINAL (the F19
+                       \*               spurious failure).
+                       \* "park"      = responder-side park-and-replay: a chase
+                       \*               at an Absent target is undeliverable
+                       \*               until the replica registers. UNSOUND:
+                       \*               finding F20 -- a chase arriving after
+                       \*               the target collected parks forever (a
+                       \*               hung requester).
+                       \* "requester" = requester-side finality: responders
+                       \*               answer deny at any dead end, but a deny
+                       \*               is ADVISORY; the requester fails only
+                       \*               when its OWN replica has committed the
+                       \*               level (it holds the commit proof), and
+                       \*               otherwise re-chases (budget-bounded) or
+                       \*               parks the retry on its own replica's
+                       \*               next protocol event. TIMELINESS HOLE:
+                       \*               a chase denied at a pre-birth new owner
+                       \*               that then holds refs quietly leaves the
+                       \*               requester waiting on protocol traffic
+                       \*               that never comes while the object lives
+                       \* "final"     = the impl as proposed by Mike 2026-09-01:
+                       \*               responder-side park-on-entry exactly as
+                       \*               in "hybrid", but denies are FINAL at the
+                       \*               requester (no local backstop): sound
+                       \*               because with the impl-faithful handshake
+                       \*               (RegRespOwnership FALSE) every deny is
+                       \*               provably genuine -- a dead-end replica
+                       \*               or bare-Absent DID implies the level
+                       \*               committed
+                       \* "hybrid"    = the proposed impl: an Absent target
+                       \*               parks the chase IFF an ownership update
+                       \*               naming it is pending there (the F18
+                       \*               PendingCollectable entry; in the impl
+                       \*               the ordered REFERENCE channel makes the
+                       \*               update-then-chase order certain), which
+                       \*               is exactly the pre-birth case; a bare
+                       \*               Absent target is post-death (deny).
+                       \*               Denies remain advisory: the requester
+                       \*               verifies against its own replica, whose
+                       \*               commit proof is guaranteed in every
+                       \*               post-death deny case
 
 ASSUME /\ OwnerSpace \in Nodes
        /\ OwnerSpace \in TreeNodes /\ TreeNodes \subseteq Nodes
@@ -71,6 +139,9 @@ ASSUME /\ OwnerSpace \in Nodes
        /\ SrcRouting \in BOOLEAN /\ BoundedLiveness \in BOOLEAN
        /\ RegClockBump \in BOOLEAN
        /\ MaxPacks \in Nat /\ MaxAcqs \in Nat
+       /\ AcquireMode \in {"deny", "park", "requester", "hybrid", "final"}
+       /\ StaleUpdateProbe \in BOOLEAN
+       /\ RegRespOwnership \in BOOLEAN
        /\ MaxRounds \in Nat /\ MaxSpawns \in Nat
 
 Max(a, b) == IF a >= b THEN a ELSE b
@@ -169,7 +240,8 @@ RegRespMsg(d, g, ow, v, lr, ck, ol) == Mk("regresp", [dst |-> d, gen |-> g,
                                       clk |-> ck, olv |-> ol])
 AcqMsg(d, o, l, h)        == Mk("acq",  [dst |-> d, cand |-> o, lvl |-> l,
                                       hops |-> h])
-DenyMsg(d)                == Mk("deny", [dst |-> d])
+DenyMsg(d, l)             == Mk("deny", [dst |-> d, lvl |-> l])
+FailMsg(d, l)             == Mk("fail", [dst |-> d, lvl |-> l])
 
 (***************************************************************************)
 (* Initial state: the owner-space replica exists VALID holding one valid  *)
@@ -525,9 +597,10 @@ RecvReg(m) ==
 RecvRegResp(m) ==
   LET s == m.dst IN
   IF m.gen = node[s].gen /\ node[s].st # "Absent" /\ node[s].st # "Local"
-  THEN LET adopt == IF OwnershipVersioning
-                    THEN m.ver > node[s].ver
-                    ELSE TRUE
+  THEN LET adopt == /\ RegRespOwnership
+                    /\ IF OwnershipVersioning
+                       THEN m.ver > node[s].ver
+                       ELSE TRUE
            f0 == [node EXCEPT
                     ![s].reg   = TRUE,
                     ![s].own   = IF adopt THEN m.ow ELSE @,
@@ -848,32 +921,121 @@ RecvRestart(m) ==
           /\ UNCHANGED <<instSet, budget>>
 
 \* Remote acquire chase at level m.lvl (grant = counted RefMsg).
+\* Common to all modes: a live self-believing owner grants; a replica
+\* genuinely below the requested level denies (the object committed
+\* there); a live non-owner forwards. The modes differ at the dead ends:
+\* an Absent target answers deny ("deny"/"requester") or parks the
+\* message until the replica registers ("park"; F20: forever if it never
+\* does). Model-bound truncations (pack budget, hop budget -- the impl
+\* chase is unbounded): in "requester" mode they answer an ADVISORY deny
+\* (harmless -- the requester retries), so no chase is silently lost; in
+\* the final-deny modes they retire the message with NO answer, since a
+\* final deny minted by a bound artifact would poison the contract check.
 RecvAcq(m) ==
   LET d == m.dst
       l == m.lvl
       orig == m.cand
       grantable == IF l = "V" THEN node[d].st = "Valid"
                    ELSE node[d].st \in {"Valid", "PGlobal", "Global"}
+      deny == /\ msgs' = (msgs \ {m}) \cup {DenyMsg(orig, l)}
+              /\ UNCHANGED <<node, instSet, budget>>
+      retire == /\ msgs' = msgs \ {m}
+                /\ UNCHANGED <<node, instSet, budget>>
   IN
-  IF /\ grantable /\ node[d].own = d
-     /\ budget.packs < MaxPacks
-  THEN LET c2 == IF node[d].bump THEN node[d].clk + 1 ELSE node[d].clk IN
-       /\ node' = [node EXCEPT ![d].sent[l] = @ + 1, ![d].clk = c2,
-                               ![d].bump = FALSE]
-       /\ budget' = [budget EXCEPT !.packs = @ + 1]
-       /\ msgs' = (msgs \ {m}) \cup
-                    {RefMsg(orig, d, l, budget.packs + 1, c2,
-                            StampOf(node[d].st))}
-       /\ UNCHANGED instSet
-  ELSE IF /\ node[d].st # "Absent" /\ node[d].own # d
-          /\ m.hops > 0
-  THEN /\ msgs' = (msgs \ {m}) \cup
-                    {AcqMsg(node[d].own, orig, l, m.hops - 1)}
-       /\ UNCHANGED <<node, instSet, budget>>
-  ELSE /\ msgs' = (msgs \ {m}) \cup {DenyMsg(orig)}
-       /\ UNCHANGED <<node, instSet, budget>>
+  IF node[d].st = "Absent"
+  THEN IF \/ AcquireMode = "park"
+          \/ (AcquireMode \in {"hybrid", "final"}
+              /\ \E m2 \in msgs : m2.t = "upd" /\ m2.dst = d)
+       THEN FALSE   \* parked: replays when the replica registers
+       ELSE deny
+  ELSE IF grantable /\ node[d].own = d
+  THEN IF budget.packs < MaxPacks
+       THEN LET c2 == IF node[d].bump THEN node[d].clk + 1
+                      ELSE node[d].clk IN
+            /\ node' = [node EXCEPT ![d].sent[l] = @ + 1, ![d].clk = c2,
+                                    ![d].bump = FALSE]
+            /\ budget' = [budget EXCEPT !.packs = @ + 1]
+            /\ msgs' = (msgs \ {m}) \cup
+                         {RefMsg(orig, d, l, budget.packs + 1, c2,
+                                 StampOf(node[d].st))}
+            /\ UNCHANGED instSet
+       ELSE IF AcquireMode \in {"requester", "hybrid"} THEN deny
+            ELSE retire
+  ELSE IF BelowLevel(node[d].st, l)
+  THEN deny   \* this replica committed the level
+  ELSE IF node[d].own # d
+  THEN IF m.hops > 0
+       THEN /\ msgs' = (msgs \ {m}) \cup
+                         {AcqMsg(node[d].own, orig, l, m.hops - 1)}
+            /\ UNCHANGED <<node, instSet, budget>>
+       ELSE IF AcquireMode \in {"requester", "hybrid"} THEN deny
+            ELSE retire
+  ELSE \* self-owner still pending at the level
+       IF AcquireMode \in {"requester", "hybrid"} THEN deny ELSE FALSE
 
+\* Deny handling. In the final-deny modes ("deny", "park") the requester
+\* just consumes it -- the deny IS the answer, and AcquireContract holds
+\* it to the commit-only standard. In "requester" mode the deny is
+\* advisory and the requester's OWN replica is the authority: a replica
+\* at-or-below commit for the level carries the proof (final failure,
+\* recorded as a fail message for the invariant); a locally-live level
+\* means the local fast path wins (retire); still-pending re-chases with
+\* the refreshed owner belief while budget lasts, and then parks the
+\* retry on the replica's next protocol event (the held deny message
+\* becomes deliverable again when the replica's state resolves).
 RecvDeny(m) ==
+  IF AcquireMode \notin {"requester", "hybrid"}
+  THEN /\ msgs' = msgs \ {m}
+       /\ UNCHANGED <<node, instSet, budget>>
+  ELSE LET r == m.dst
+           l == m.lvl
+           locsat == IF l = "V" THEN node[r].st = "Valid"
+                     ELSE node[r].st \in {"Valid", "PGlobal", "Global"}
+       IN
+       IF node[r].st = "Absent" \/ BelowLevel(node[r].st, l)
+       THEN /\ msgs' = (msgs \ {m}) \cup {FailMsg(r, l)}
+            /\ UNCHANGED <<node, instSet, budget>>
+       ELSE IF locsat
+       THEN /\ msgs' = msgs \ {m}
+            /\ UNCHANGED <<node, instSet, budget>>
+       ELSE IF budget.acqs < MaxAcqs
+       THEN /\ msgs' = (msgs \ {m}) \cup
+                         {AcqMsg(node[r].own, r, l, Cardinality(Nodes) + 2)}
+            /\ budget' = [budget EXCEPT !.acqs = @ + 1]
+            /\ UNCHANGED <<node, instSet>>
+       ELSE FALSE   \* retry parked on the replica's next protocol event
+
+\* The requester's final acquire failure (requester mode only); exists
+\* on the wire solely so AcquireContract can audit its justification.
+RecvFail(m) ==
+  /\ msgs' = msgs \ {m}
+  /\ UNCHANGED <<node, instSet, budget>>
+
+\* Hybrid mode: the requester abandons an outstanding chase once its own
+\* replica carries the commit proof (in the impl: the local protocol
+\* event triggers the acquire block's ready exactly once; a parked chase
+\* message may leak at a dead DID -- finding F21 -- but the REQUESTER
+\* resolves, and a racing late grant is returned by the handler).
+AbandonAcq(m) ==
+  /\ AcquireMode = "hybrid"
+  /\ m.t = "acq"
+  /\ \/ node[m.cand].st = "Absent"
+     \/ BelowLevel(node[m.cand].st, m.lvl)
+  /\ msgs' = msgs \ {m}
+  /\ UNCHANGED <<node, instSet, budget>>
+
+\* F21 fix: the owner-space liveness probe reclaims a stale ownership
+\* transfer parked at a dead DID. An update stuck at an Absent target is
+\* the parked pending_collectables entry; the probe's DEAD verdict
+\* (owner-space replica beyond GLOBAL -- the last replica to die, per
+\* DeadOwnerClean) erases it. The impl defers the verdict at a PENDING
+\* owner-space replica until the round resolves; enabling on the stable
+\* owner-space state models that.
+DropStaleUpd(m) ==
+  /\ StaleUpdateProbe
+  /\ m.t = "upd"
+  /\ node[m.dst].st = "Absent"
+  /\ node[OwnerSpace].st \in {"Local", "Absent"}
   /\ msgs' = msgs \ {m}
   /\ UNCHANGED <<node, instSet, budget>>
 
@@ -892,11 +1054,14 @@ Recv(m) ==
     [] m.t = "restart" -> RecvRestart(m)
     [] m.t = "acq"     -> RecvAcq(m)
     [] m.t = "deny"    -> RecvDeny(m)
+    [] m.t = "fail"    -> RecvFail(m)
     [] m.t = "unpin"   -> RecvUnpin(m)
     [] OTHER           -> FALSE
 
 ProgressNext ==
   \/ \E m \in msgs : Recv(m)
+  \/ \E m \in msgs : AbandonAcq(m)
+  \/ \E m \in msgs : DropStaleUpd(m)
   \/ \E n \in Nodes, l \in Lvls : DropRef(n, l)
   \/ \E n \in Nodes : Collect(n)
 
@@ -982,6 +1147,37 @@ NoRequestAtBusyNode ==
 RootRetainsOwnership ==
   \A n \in Nodes :
     (node[n].rnd.act /\ node[n].rnd.ow = n) => (node[n].own = n)
+
+(* F19 acquire contract (ruling 2026-08-31): an acquire may fail only if *)
+(* the object actually committed its downgrade at the requested level.   *)
+(* Stated on the wire: while a deny for level l is in flight, the        *)
+(* l-level death must be globally justified (the stable post-commit      *)
+(* facts of ValidDeadClean / DeadOwnerClean). A violation trace is a     *)
+(* spurious deny -- the class of failure behind the expression.cc:269    *)
+(* aborts.                                                               *)
+FinalFail(m) == \/ m.t = "fail"
+                \/ (m.t = "deny" /\ AcquireMode \in {"deny", "park", "final"})
+AcquireContract ==
+  \A m \in msgs : FinalFail(m) =>
+    IF m.lvl = "V"
+    THEN /\ \A n \in Nodes : node[n].st # "Valid" /\ node[n].refs["V"] = 0
+         /\ ~\E m2 \in msgs : m2.t = "ref" /\ (m2.lvl = "V" \/ m2.olv = "V")
+    ELSE /\ \A n \in Nodes : node[n].st \in {"PLocal", "Local", "Absent"}
+         /\ \A n \in Nodes, l \in Lvls : node[n].refs[l] = 0
+         /\ ~\E m2 \in msgs : m2.t = "ref"
+
+(* Every acquire chase eventually resolves (grant, deny, or a documented *)
+(* model-bound truncation). A chase parked forever is a requester thread *)
+(* waiting forever on its ready event in the implementation -- a hang    *)
+(* that EventualCollection alone cannot see, because its all-Absent      *)
+(* disjunct does not require the network to drain.                       *)
+AcqResolved == <>[](~\E m \in msgs : m.t \in {"acq", "deny", "fail"})
+
+(* F21: parked ownership transfers must not leak. An update message     *)
+(* stuck forever at an Absent destination IS the leaked                 *)
+(* pending_collectables entry (and, before the probe fix, a booby trap  *)
+(* for any later blocking find or find_or_request on that DID).         *)
+UpdsDrain == <>[](~\E m \in msgs : m.t = "upd")
 
 (* Bounded-liveness cap excuse: quiescent states where the ONLY missing
    step is a retry the round budget forbids. Requires: empty network, no

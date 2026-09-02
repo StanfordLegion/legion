@@ -204,7 +204,12 @@ namespace Legion {
         case DISTRIBUTED_GLOBAL_ACQUIRE_RESPONSE:
           break;
         case DISTRIBUTED_VALID_ACQUIRE_REQUEST:
-          break;
+          // Same channel as the downgrade updates and the global acquire
+          // requests: a forwarded chase must order BEHIND the ownership
+          // transfer that legitimized it, or it can reach a still-
+          // materializing new owner before the transfer parks there and
+          // take a spurious final deny (finding F19 at the valid level)
+          return REFERENCE_VIRTUAL_CHANNEL;
         case DISTRIBUTED_VALID_ACQUIRE_RESPONSE:
           break;
         case SEND_ATOMIC_RESERVATION_REQUEST:
