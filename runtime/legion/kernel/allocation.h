@@ -139,7 +139,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_TRACE_ALLOCATION
-      LegionAllocation::trace_free(typeid(TRACE_TYPE), size);
+      if (ptr != nullptr)
+        LegionAllocation::trace_free(typeid(TRACE_TYPE), size);
 #endif
       std::free(ptr);
     }

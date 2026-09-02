@@ -32,7 +32,7 @@ namespace Legion {
     class BufferManager : public NoHeapify {
     public:
       inline BufferManager(void) : size(0) { }
-      inline BufferManager(const void* buffer, size_t s)
+      inline BufferManager(const void* buffer, size_t s) : size(0)
       {
         save_buffer(buffer, s);
       }
