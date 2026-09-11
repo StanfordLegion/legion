@@ -1942,23 +1942,17 @@ namespace Legion {
               copy_expr->get_canonical_expression();
           target = dynamic_cast<IndexSpaceNode*>(canonical);
           // Need to add a valid reference to make sure we can safely use
-          // this node and everything above it in the tree. If the node
-          // has a parent we need to add the valid reference to the
-          // partition which will keep a valid reference all the way
-          // up the tree and also on its immediate children
-          if ((target != nullptr) &&
-              ((target->parent == nullptr) ?
-                   target->check_valid_and_increment(did) :
-                   target->parent->check_valid_and_increment(did)))
+          // this node. The call to add_internal_node_user will attempt to
+          // add a valid reference to the parent partition before traversing
+          // up the tree.
+          if ((target != nullptr) && target->check_valid_and_increment(did))
           {
             PhysicalUser* user = new PhysicalUser(
                 usage, copy_expr, term_event, op_id, index, true /*copy user*/,
                 true /*covers*/);
             add_internal_node_user(user, copy_mask, target);
             // Remove the extra valid reference that we added
-            if ((target->parent == nullptr) ?
-                    target->remove_nested_valid_ref(did) :
-                    target->parent->remove_nested_valid_ref(did))
+            if (target->remove_nested_valid_ref(did))
               std::abort();  // should never hit this
           }
           else
@@ -2063,96 +2057,136 @@ namespace Legion {
     {
       // Traverse upwards to see if we can find a root to insert
       local::vector<LegionColor> path;
-      IndexTreeNode* node = user_expr;
-      // The common case for this should be read-only
+      // The caller guarantees that the user expression is valid. Before
+      // traversing up, make sure we can take a valid reference on its parent
+      // partition to keep the rest of the path alive. No additional reference
+      // is needed if the user expression is the root of the index tree.
+      IndexPartNode* const parent = user_expr->parent;
+      if ((parent != nullptr) && parent->check_valid_and_increment(did))
       {
-        AutoLock v_lock(view_lock, false /*exclusive*/);
-        while (node != nullptr)
+        IndexTreeNode* node = user_expr;
+        // The common case for this should be read-only
         {
-          bool need_mutable = false;
-          for (lng::FieldMaskMap<NodeView>::const_iterator it = roots.begin();
-               it != roots.end(); it++)
+          AutoLock v_lock(view_lock, false /*exclusive*/);
+          while (node != nullptr)
           {
-            // First check to see if the parent is a root
-            if (it->first->tree_node == node)
+            bool need_mutable = false;
+            for (lng::FieldMaskMap<NodeView>::const_iterator it = roots.begin();
+                 it != roots.end(); it++)
             {
-              if (!(user_mask - it->second))
+              // First check to see if the parent is a root
+              if (it->first->tree_node == node)
               {
-                // Insert going down
-                it->first->insert_user(user, user_mask, path, v_lock);
-                return;
+                if (!(user_mask - it->second))
+                {
+                  // Insert going down
+                  it->first->insert_user(user, user_mask, path, v_lock);
+                  // Remove the valid reference protecting the path
+                  if (parent->remove_nested_valid_ref(did))
+                    std::abort();  // should never hit this
+                  return;
+                }
+                else
+                {
+                  need_mutable = true;
+                  break;
+                }
               }
-              else
+              // See if we have a shared parent along this path
+              // If so we need to break out to go down the exclusive path
+              if (it->first->tree_node->get_parent() == node)
               {
                 need_mutable = true;
                 break;
               }
             }
+            if (need_mutable)
+              break;
+            path.push_back(node->color);
+            node = node->get_parent();
+          }
+          // Failed so we are falling through to the mutable path
+        }
+        // Reset so we can try again
+        path.clear();
+        node = user_expr;
+        // Now take the root lock and see if we need to insert the child
+        // and update the roots
+        AutoLock v_lock(view_lock);
+        while (node != nullptr)
+        {
+          for (lng::FieldMaskMap<NodeView>::iterator it = roots.begin();
+               it != roots.end(); it++)
+          {
+            // First check to see if the parent is a root
+            if (it->first->tree_node == node)
+            {
+              it.merge(user_mask);
+              // Insert going down
+              it->first->insert_user(user, user_mask, path, v_lock);
+              // Remove the valid reference protecting the path
+              if (parent->remove_nested_valid_ref(did))
+                std::abort();  // should never hit this
+              return;
+            }
             // See if we have a shared parent along this path
-            // If so we need to break out to go down the exclusive path
             if (it->first->tree_node->get_parent() == node)
             {
-              need_mutable = true;
-              break;
+              // Make the new root node
+              NodeView* new_root = node->is_index_space_node() ?
+                                       (NodeView*)new SpaceView(
+                                           node->as_index_space_node(), this) :
+                                       (NodeView*)new PartitionView(
+                                           node->as_index_part_node(), this);
+              new_root->insert_child(it->first, it->second);
+              const FieldMask root_mask = user_mask | it->second;
+              // No need to check for deletions, added another reference
+              // with the insert_child call
+              it->first->remove_reference();
+              roots.erase(it);
+              if (roots.insert(new_root, root_mask))
+                new_root->add_reference();
+              new_root->insert_user(user, user_mask, path, v_lock);
+              // Remove the valid reference protecting the path
+              if (parent->remove_nested_valid_ref(did))
+                std::abort();  // should never hit this
+              return;
             }
           }
-          if (need_mutable)
-            break;
           path.push_back(node->color);
           node = node->get_parent();
         }
-        // Failed so we are falling through to the mutable path
+        // If we get here we couldn't find anything to merge with so the
+        // node is its own root
+        path.clear();
+        SpaceView* new_root = new SpaceView(user_expr, this);
+        if (roots.insert(new_root, user_mask))
+          new_root->add_reference();
+        new_root->insert_user(user, user_mask, path, v_lock);
+        // Remove the valid reference protecting the path
+        if (parent->remove_nested_valid_ref(did))
+          std::abort();  // should never hit this
       }
-      // Reset so we can try again
-      path.clear();
-      node = user_expr;
-      // Now take the root lock and see if we need to insert the child
-      // and update the roots
-      AutoLock v_lock(view_lock);
-      while (node != nullptr)
+      else
       {
+        AutoLock v_lock(view_lock);
+        // We cannot safely traverse above the user expression, but we can
+        // still merge with a root that is already at this exact node.
         for (lng::FieldMaskMap<NodeView>::iterator it = roots.begin();
              it != roots.end(); it++)
         {
-          // First check to see if the parent is a root
-          if (it->first->tree_node == node)
+          if (it->first->tree_node == user_expr)
           {
             it.merge(user_mask);
-            // Insert going down
             it->first->insert_user(user, user_mask, path, v_lock);
             return;
           }
-          // See if we have a shared parent along this path
-          if (it->first->tree_node->get_parent() == node)
-          {
-            // Make the new root node
-            NodeView* new_root = node->is_index_space_node() ?
-                                     (NodeView*)new SpaceView(
-                                         node->as_index_space_node(), this) :
-                                     (NodeView*)new PartitionView(
-                                         node->as_index_part_node(), this);
-            new_root->insert_child(it->first, it->second);
-            const FieldMask root_mask = user_mask | it->second;
-            // No need to check for deletions, added another reference
-            // with the insert_child call
-            it->first->remove_reference();
-            roots.erase(it);
-            if (roots.insert(new_root, root_mask))
-              new_root->add_reference();
-            new_root->insert_user(user, user_mask, path, v_lock);
-            return;
-          }
         }
-        path.push_back(node->color);
-        node = node->get_parent();
+        SpaceView* new_root = new SpaceView(user_expr, this);
+        if (roots.insert(new_root, user_mask))
+          new_root->add_reference();
+        new_root->insert_user(user, user_mask, path, v_lock);
       }
-      // If we get here we couldn't find anything to merge with so the
-      // node is its own root
-      path.clear();
-      SpaceView* new_root = new SpaceView(user_expr, this);
-      if (roots.insert(new_root, user_mask))
-        new_root->add_reference();
-      new_root->insert_user(user, user_mask, path, v_lock);
     }
 
     //--------------------------------------------------------------------------
