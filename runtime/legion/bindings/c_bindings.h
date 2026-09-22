@@ -17,7 +17,7 @@
 #define __LEGION_C_H__
 
 /**
- * \file legion_c.h
+ * \file c_bindings.h
  * Legion C API
  */
 

@@ -17,7 +17,7 @@
 #define __LEGION_CONSTRAINT_H__
 
 /**
- * \file legion_constraints.h
+ * \file constraints.h
  */
 
 #include "legion/api/types.h"

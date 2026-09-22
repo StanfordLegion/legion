@@ -387,6 +387,10 @@ namespace Legion {
     IndexSpace sharding_space;
   };
 
+  /**
+   * \namespace Legion::Mapping
+   * Namespace for the Legion mapping interface
+   */
   namespace Mapping {
 
     /**

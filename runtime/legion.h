@@ -39,8 +39,11 @@
 /**
  * \mainpage Legion Runtime Documentation
  *
- * This is the main page of the Legion Runtime documentation.
+ * This is the main page of the Legion Runtime documentation. The %Legion
+ * namespace lists every public type in the C++ API; Legion::Runtime is the
+ * primary interface through which tasks issue operations.
  *
+ * @see Legion
  * @see Legion::Runtime
  */
 

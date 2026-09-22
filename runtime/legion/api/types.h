@@ -106,6 +106,10 @@ inline T1 legion_safe_cast(T2* ptr)
 }
 #endif
 
+/**
+ * \namespace Legion
+ * Namespace for all Legion runtime objects
+ */
 namespace Legion {
 
   // Pull C types into the C++ namespace
