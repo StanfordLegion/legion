@@ -539,11 +539,19 @@ if (Legion_BUILD_DOCS)
   set(DOXYGEN_PROJECT_NAME "Legion")
   set(DOXYGEN_PROJECT_NUMBER ${LEGION_VERSION})
   configure_file(${CMAKE_SOURCE_DIR}/doxygen/selectversion.js.in ${CMAKE_BINARY_DIR}/legion_docs/selectversion.js @ONLY)
-  # TODO(mbauer): Annotate and or list all public legion headers
-  doxygen_add_docs(LegionDocs
+  # The public API is legion.h, the headers under legion/api, the C bindings
+  # and the mappers that applications build on; everything else under legion/
+  # is implementation detail and is only documented for internal docs.
+  set(LEGION_DOC_SOURCES
       ${CMAKE_CURRENT_SOURCE_DIR}/legion.h
-      ${CMAKE_CURRENT_SOURCE_DIR}/legion
-      ${CMAKE_CURRENT_BINARY_DIR}/legion_defines.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/legion/api
+      ${CMAKE_CURRENT_SOURCE_DIR}/legion/bindings/c_bindings.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/mappers
+      ${CMAKE_CURRENT_BINARY_DIR}/legion_defines.h)
+  if (Legion_BUILD_INTERNAL_DOCS)
+    list(APPEND LEGION_DOC_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/legion)
+  endif()
+  doxygen_add_docs(LegionDocs ${LEGION_DOC_SOURCES}
       COMMENT "Generating Legion Documentation" ALL)
 
   install(DIRECTORY "${CMAKE_BINARY_DIR}/legion_docs/html/" DESTINATION "${CMAKE_INSTALL_DOCDIR}/Legion/${LEGION_VERSION}" COMPONENT Legion_doc)

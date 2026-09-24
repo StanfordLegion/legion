@@ -16,6 +16,11 @@
 #ifndef __LEGION_DATA_H__
 #define __LEGION_DATA_H__
 
+/**
+ * \file data.h
+ * Handles for index spaces, field spaces and logical regions
+ */
+
 #include "legion/api/types.h"
 
 namespace Legion {

@@ -16,6 +16,11 @@
 #ifndef __DEBUG_MAPPER_H__
 #define __DEBUG_MAPPER_H__
 
+/**
+ * \file debug_mapper.h
+ * A mapper that makes deterministic choices to aid debugging
+ */
+
 #include "mappers/replay_mapper.h"
 
 namespace Legion {

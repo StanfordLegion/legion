@@ -16,6 +16,11 @@
 #ifndef __LEGION_DEFERRED_BUFFERS_H__
 #define __LEGION_DEFERRED_BUFFERS_H__
 
+/**
+ * \file buffers.h
+ * Deferred buffers allocated by the runtime on behalf of a task
+ */
+
 #include "legion/api/data.h"
 #include "legion/api/values.h"
 

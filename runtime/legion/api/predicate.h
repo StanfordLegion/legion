@@ -16,6 +16,11 @@
 #ifndef __LEGION_PREDICATE_H__
 #define __LEGION_PREDICATE_H__
 
+/**
+ * \file predicate.h
+ * Predicates for speculatively issuing operations
+ */
+
 #include "legion/api/types.h"
 
 namespace Legion {

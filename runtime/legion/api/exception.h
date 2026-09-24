@@ -16,6 +16,11 @@
 #ifndef __LEGION_EXCEPTION_H__
 #define __LEGION_EXCEPTION_H__
 
+/**
+ * \file exception.h
+ * Exceptions reported by the runtime and the handlers for them
+ */
+
 #include "legion/api/types.h"
 
 namespace Legion {

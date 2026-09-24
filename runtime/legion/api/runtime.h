@@ -16,6 +16,11 @@
 #ifndef __LEGION_RUNTIME_H__
 #define __LEGION_RUNTIME_H__
 
+/**
+ * \file runtime.h
+ * The Runtime class, the primary interface to Legion
+ */
+
 #include "legion/api/buffers.h"
 #include "legion/api/functors.h"
 #include "legion/api/future.h"

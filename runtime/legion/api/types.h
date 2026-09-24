@@ -16,6 +16,11 @@
 #ifndef __LEGION_TYPES_H__
 #define __LEGION_TYPES_H__
 
+/**
+ * \file types.h
+ * Types, enumerations and forward declarations shared across the API
+ */
+
 #include <cassert>
 #include <limits>
 #include <optional>

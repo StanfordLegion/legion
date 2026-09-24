@@ -16,6 +16,11 @@
 #ifndef __LEGION_ACCESSORS_H__
 #define __LEGION_ACCESSORS_H__
 
+/**
+ * \file accessors.h
+ * Accessors for reading and writing the fields of a physical region
+ */
+
 #include "legion/api/buffers.h"
 #include "legion/api/future.h"
 #include "legion/api/physical_region.h"

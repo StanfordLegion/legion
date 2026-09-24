@@ -16,6 +16,11 @@
 #ifndef __LEGION_REGISTRARS_H__
 #define __LEGION_REGISTRARS_H__
 
+/**
+ * \file registrars.h
+ * Registrars for task variants and layout constraints
+ */
+
 #include "legion/api/constraints.h"
 #include "legion/api/data.h"
 

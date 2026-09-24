@@ -17,6 +17,11 @@
 #ifndef __NULL_MAPPER_H__
 #define __NULL_MAPPER_H__
 
+/**
+ * \file null_mapper.h
+ * A mapper that fails every call, for building a mapper from scratch
+ */
+
 #include "legion.h"
 
 #include <stdlib.h>

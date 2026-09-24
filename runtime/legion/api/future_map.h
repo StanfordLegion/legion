@@ -16,6 +16,11 @@
 #ifndef __LEGION_FUTURE_MAP_H__
 #define __LEGION_FUTURE_MAP_H__
 
+/**
+ * \file future_map.h
+ * Future maps holding a future for each point of an index space launch
+ */
+
 #include "legion/api/future.h"
 
 namespace Legion {

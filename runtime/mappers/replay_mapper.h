@@ -16,6 +16,11 @@
 #ifndef __REPLAY_MAPPER_H__
 #define __REPLAY_MAPPER_H__
 
+/**
+ * \file replay_mapper.h
+ * A mapper that replays the mapping decisions from a previous run
+ */
+
 #include "legion.h"
 
 #include <stdlib.h>

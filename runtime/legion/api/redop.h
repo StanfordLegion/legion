@@ -16,6 +16,11 @@
 #ifndef __LEGION_REDOP_H__
 #define __LEGION_REDOP_H__
 
+/**
+ * \file redop.h
+ * Built-in reduction operators for the primitive types
+ */
+
 #include <atomic>
 #include <cstring>
 #include <limits>

@@ -16,6 +16,11 @@
 #ifndef __LEGION_MAPPING_H__
 #define __LEGION_MAPPING_H__
 
+/**
+ * \file mapping.h
+ * The mapper interface and the operations presented to it
+ */
+
 // Need these since we're handing these to the client
 #include <map>
 #include <set>

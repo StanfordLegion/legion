@@ -16,6 +16,11 @@
 #ifndef __LOGGING_WRAPPER_H__
 #define __LOGGING_WRAPPER_H__
 
+/**
+ * \file logging_wrapper.h
+ * A mapper wrapper that logs each mapping call and its result
+ */
+
 #include "mappers/forwarding_mapper.h"
 
 namespace Legion {

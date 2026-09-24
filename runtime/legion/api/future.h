@@ -16,6 +16,11 @@
 #ifndef __LEGION_FUTURE_H__
 #define __LEGION_FUTURE_H__
 
+/**
+ * \file future.h
+ * Futures returned from asynchronous operations
+ */
+
 #include "legion/api/physical_region.h"
 
 namespace Legion {

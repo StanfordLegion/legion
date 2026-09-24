@@ -16,6 +16,11 @@
 #ifndef __LEGION_ARGUMENT_MAP_H__
 #define __LEGION_ARGUMENT_MAP_H__
 
+/**
+ * \file argument_map.h
+ * Untyped buffers and the argument maps that carry them to point tasks
+ */
+
 #include "legion/api/future_map.h"
 
 namespace Legion {
