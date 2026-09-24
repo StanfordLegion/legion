@@ -2127,7 +2127,16 @@ namespace Legion {
             memory_pools.find(key);
         if ((finder != memory_pools.end()) &&
             finder->second->contains_instance(it.first))
+        {
+          // The pool will reclaim the memory range for this instance
+          // wholesale when it is finalized, so we must not free it back
+          // through the memory manager. We do still own the external Realm
+          // instance handle though, and this is the last chance to destroy
+          // it: if we don't then Realm can never recycle the backing
+          // RegionInstanceImpl,
+          it.first.destroy(safe_effects);
           continue;
+        }
         MemoryManager* manager =
             runtime->find_memory_manager(it.first.get_location());
 #ifdef LEGION_MALLOC_INSTANCES
