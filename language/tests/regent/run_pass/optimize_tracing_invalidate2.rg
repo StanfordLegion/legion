@@ -60,6 +60,8 @@ task toplevel()
       foo(r)
       bar(r)
     end
+    -- The handle is destroyed after the trace so the traced body is unchanged.
+    c.legion_physical_region_destroy(pr)
   end
 
   __demand(__trace)
