@@ -16,6 +16,11 @@
 #ifndef __LEGION_LAUNCHERS_H__
 #define __LEGION_LAUNCHERS_H__
 
+/**
+ * \file launchers.h
+ * Launcher objects describing the operations an application issues
+ */
+
 #include "legion/api/argument_map.h"
 #include "legion/api/constraints.h"
 #include "legion/api/future_map.h"

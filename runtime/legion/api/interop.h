@@ -16,6 +16,11 @@
 #ifndef __LEGION_INTEROP_H__
 #define __LEGION_INTEROP_H__
 
+/**
+ * \file interop.h
+ * Handshakes for interoperating with MPI and other runtimes
+ */
+
 #include "legion/api/types.h"
 
 namespace Legion {

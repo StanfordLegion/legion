@@ -16,6 +16,11 @@
 #ifndef __LEGION_OUTPUT_REGION_H__
 #define __LEGION_OUTPUT_REGION_H__
 
+/**
+ * \file output_region.h
+ * Output regions whose size is determined by the task that produces them
+ */
+
 #include "legion/api/constraints.h"
 
 namespace Legion {

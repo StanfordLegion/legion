@@ -17,6 +17,11 @@
 #ifndef __SHIM_MAPPER_H__
 #define __SHIM_MAPPER_H__
 
+/**
+ * \file shim_mapper.h
+ * A mapper that adapts mappers written against older interfaces
+ */
+
 #include "legion.h"
 #include "mappers/mapping_utilities.h"
 #include "mappers/default_mapper.h"

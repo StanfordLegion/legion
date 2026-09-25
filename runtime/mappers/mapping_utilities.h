@@ -17,6 +17,11 @@
 #ifndef __MAPPING_UTILITIES__
 #define __MAPPING_UTILITIES__
 
+/**
+ * \file mapping_utilities.h
+ * Utilities for querying the machine and profiling mapping decisions
+ */
+
 #include "legion.h"
 
 #include <stdlib.h>

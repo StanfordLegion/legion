@@ -16,6 +16,11 @@
 #ifndef __LEGION_SYNCHRONIZATION_H__
 #define __LEGION_SYNCHRONIZATION_H__
 
+/**
+ * \file sync.h
+ * Locks, grants, phase barriers and other synchronization primitives
+ */
+
 #include "legion/api/types.h"
 
 namespace Legion {

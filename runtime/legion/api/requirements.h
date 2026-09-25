@@ -16,6 +16,11 @@
 #ifndef __LEGION_REQUIREMENTS_H__
 #define __LEGION_REQUIREMENTS_H__
 
+/**
+ * \file requirements.h
+ * Requirements naming the regions and fields an operation uses
+ */
+
 #include "legion/api/data.h"
 
 namespace Legion {

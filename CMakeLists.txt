@@ -271,12 +271,20 @@ if (Legion_BUILD_DOCS)
   set(DOXYGEN_SEARCH_INCLUDES YES)
   set(DOXYGEN_ENABLE_PREPROCESSING YES)
   set(DOXYGEN_RECURSIVE YES)
+  # Declarations live in headers; the .inl and .cc files are definitions.
+  set(DOXYGEN_FILE_PATTERNS *.h)
+  # legion.h only exposes the C++ API, and with it the main page, when these
+  # are defined; the compiler gets them from __cplusplus, doxygen cannot.
+  set(DOXYGEN_PREDEFINED LEGION_ENABLE_CXX_BINDINGS LEGION_ENABLE_C_BINDINGS)
   set(DOXYGEN_HTML_HEADER ${CMAKE_CURRENT_SOURCE_DIR}/doxygen/header.html)
   set(DOXYGEN_HTML_FOOTER ${CMAKE_CURRENT_SOURCE_DIR}/doxygen/footer.html)
   set(DOXYGEN_HTML_EXTRA_STYLESHEET ${CMAKE_CURRENT_SOURCE_DIR}/doxygen/customdoxygen.css)
   if (Legion_BUILD_INTERNAL_DOCS)
     set(DOXYGEN_INTERNAL_DOCS ${Legion_BUILD_INTERNAL_DOCS})
     set(DOXYGEN_ENABLED_SECTIONS INTERNAL)
+  else()
+    # The _impl.h headers sitting under legion/api are implementation detail.
+    set(DOXYGEN_EXCLUDE_PATTERNS *_impl.h)
   endif()
 endif()
 

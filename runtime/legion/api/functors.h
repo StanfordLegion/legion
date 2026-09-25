@@ -16,6 +16,11 @@
 #ifndef __LEGION_FUNCTORS_H__
 #define __LEGION_FUNCTORS_H__
 
+/**
+ * \file functors.h
+ * Application functors for sharding, coloring, futures and point transforms
+ */
+
 #include "legion/api/geometry.h"
 
 namespace Legion {

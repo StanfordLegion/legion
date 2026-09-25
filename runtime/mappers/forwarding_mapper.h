@@ -16,6 +16,11 @@
 #ifndef __FORWARDING_MAPPER_H__
 #define __FORWARDING_MAPPER_H__
 
+/**
+ * \file forwarding_mapper.h
+ * A mapper that forwards every call to another mapper
+ */
+
 #include "legion.h"
 
 namespace Legion {

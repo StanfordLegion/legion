@@ -16,6 +16,11 @@
 #ifndef __LEGION_PHYSICAL_REGION_H__
 #define __LEGION_PHYSICAL_REGION_H__
 
+/**
+ * \file physical_region.h
+ * Physical regions and the instances backing them
+ */
+
 #include "legion/api/types.h"
 #include "legion/api/geometry.h"
 #include "legion/api/buffers.h"

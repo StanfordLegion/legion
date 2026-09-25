@@ -16,6 +16,11 @@
 #ifndef __LEGION_DEFERRED_VALUES_H__
 #define __LEGION_DEFERRED_VALUES_H__
 
+/**
+ * \file values.h
+ * Deferred values and reductions produced by a task
+ */
+
 #include "legion/api/types.h"
 #include "legion/api/geometry.h"
 

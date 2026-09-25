@@ -50,6 +50,11 @@
 #ifndef __WRAPPER_MAPPER_h__
 #define __WRAPPER_MAPPER_h__
 
+/**
+ * \file wrapper_mapper.h
+ * A mapper wrapper for interactively inspecting mapping calls
+ */
+
 #include "legion.h"
 
 #include <stdlib.h>

@@ -16,6 +16,11 @@
 #ifndef __LEGION_TRANSFORMS_H__
 #define __LEGION_TRANSFORMS_H__
 
+/**
+ * \file transforms.h
+ * Affine and scaling transforms between index spaces
+ */
+
 #include "legion/api/geometry.h"
 
 namespace Legion {

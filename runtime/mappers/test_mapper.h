@@ -17,6 +17,11 @@
 #ifndef __TEST_MAPPER_H__
 #define __TEST_MAPPER_H__
 
+/**
+ * \file test_mapper.h
+ * A mapper that makes random legal choices to stress the runtime
+ */
+
 #include "legion.h"
 #include "mappers/default_mapper.h"
 

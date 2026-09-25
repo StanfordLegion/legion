@@ -16,6 +16,11 @@
 #ifndef __LEGION_GEOMETRY_H__
 #define __LEGION_GEOMETRY_H__
 
+/**
+ * \file geometry.h
+ * Points and domains naming the elements of an index space
+ */
+
 #include <cstring>
 #include "legion/api/types.h"
 

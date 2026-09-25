@@ -17,6 +17,11 @@
 #ifndef __DEFAULT_MAPPER_H__
 #define __DEFAULT_MAPPER_H__
 
+/**
+ * \file default_mapper.h
+ * The default mapper, the base class for most application mappers
+ */
+
 #include "legion.h"
 #include "mappers/mapping_utilities.h"
 
