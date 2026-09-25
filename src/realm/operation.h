@@ -122,6 +122,9 @@ namespace Realm {
     GenEventImpl *finish_event;
     EventImpl::gen_t finish_gen;
     atomic<int> refcount;
+    // true if the finish event took ownership of our initial reference (see
+    //  GenEventImpl::set_trigger_op) - otherwise we release it ourselves on completion
+    bool finish_event_owns_ref;
 
   public:
     Event get_finish_event(void) const;

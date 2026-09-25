@@ -1369,7 +1369,18 @@ namespace Realm {
 
           // catch up the current state
           do {
-            allocated = it->release(current_allocator, offsets);
+            if(it->inst == old_inst) {
+              // only old_inst's own entry uses the offsets flavor -
+              //  'allocated'/'offsets' describe old_inst's new instances and
+              //  must not be clobbered by drained followers
+              allocated = it->release(current_allocator, offsets);
+            } else {
+              // ready followers may be plain destroys or redistricts with a
+              //  different child count - the void flavor dispatches correctly
+              //  on both (and a redistrict follower's children were already
+              //  notified with these same offsets when it was marked ready)
+              it->release(current_allocator);
+            }
             // any prior bad-path entry whose tag is now finally being removed
             //  from current_allocator can have its dealloc notification fired
             if((it->inst != old_inst) && it->deferred_dealloc_notify)

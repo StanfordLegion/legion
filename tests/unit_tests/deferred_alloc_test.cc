@@ -273,6 +273,188 @@ TEST_F(DeferredAllocBadPathTest, ReuseStorageDeferrableReorderFailDefersRecycle)
   EXPECT_TRUE(slot_on_free_list(A));
 }
 
+// Regression test for the oldest-path catch-up drain in
+// reuse_storage_immediate sweeping a *plain* ready follower.  The drain
+// walks the ready prefix of pending_releases, but only the first entry is
+// old_inst's redistrict - a ready follower can be a plain destroy queued
+// by release_storage_deferrable's reorder-fail pushback.  The drain must
+// apply the offsets-flavor release (which fills the caller's
+// 'allocated'/'offsets' for old_inst's children) only to old_inst's own
+// entry and the void flavor to followers; applying the offsets flavor to a
+// plain follower trips assert(!redistrict_tags.empty()) in debug builds
+// and, in release builds, clobbers 'allocated' so old_inst's children are
+// mis-notified ALLOC_EVENTUAL_FAILURE while their tags stay in
+// current_allocator.
+//
+// Layout: P=50 at [0,50), A=30 at [50,80), C=20 at [80,100) -> full.
+//   1. redistrict P -> {P1=10} deferred on an untriggered precondition.
+//   2. request D=40 - fits the future hole [10,50) -> ALLOC_DEFERRED.
+//   3. destroy A with a triggered precondition - reorder can't fit D=40 in
+//      the 30-unit hole, so A's entry is queued ready behind P's.
+//   4. fire P's precondition - reuse_storage_immediate's oldest path drains
+//      P's redistrict (iteration 1), satisfies D, then sweeps A's plain
+//      ready entry (iteration 2).
+TEST_F(DeferredAllocBadPathTest, ReuseOldestDrainSweepsPlainFollower)
+{
+  RegionInstanceImpl *P = make_inst(50);
+  RegionInstanceImpl *A = make_inst(30);
+  RegionInstanceImpl *C = make_inst(20);
+  RegionInstanceImpl *D = make_inst(40);
+  RegionInstanceImpl *P1 = make_inst(10);
+
+  ASSERT_EQ(MemoryImpl::ALLOC_INSTANT_SUCCESS,
+            mem_->allocate_storage_deferrable(P, false, Event::NO_EVENT));
+  ASSERT_EQ(MemoryImpl::ALLOC_INSTANT_SUCCESS,
+            mem_->allocate_storage_deferrable(A, false, Event::NO_EVENT));
+  ASSERT_EQ(MemoryImpl::ALLOC_INSTANT_SUCCESS,
+            mem_->allocate_storage_deferrable(C, false, Event::NO_EVENT));
+
+  // Step 1: deferred redistrict of P -> {P1}.
+  Event p_precondition = GenEventImpl::create_genevent()->current_event();
+  std::vector<RegionInstanceImpl *> p_children = {P1};
+  ASSERT_EQ(MemoryImpl::ALLOC_DEFERRED,
+            mem_->reuse_storage_deferrable(P, p_children, p_precondition));
+  ASSERT_EQ(1u, mem_->pending_releases.size());
+  ASSERT_FALSE(mem_->pending_releases.front().is_ready);
+
+  // Step 2: D=40 fits only the future hole [10,50) left by P's split.
+  ASSERT_EQ(MemoryImpl::ALLOC_DEFERRED,
+            mem_->allocate_storage_deferrable(D, false, Event::NO_EVENT));
+  ASSERT_EQ(1u, mem_->pending_allocs.size());
+
+  // Step 3: triggered destroy of A - attempt_release_reordering can't fit
+  // D=40 in the 30-unit hole, so A lands ready behind P's entry.
+  mem_->release_storage_deferrable(A, Event::NO_EVENT);
+  ASSERT_EQ(2u, mem_->pending_releases.size());
+  {
+    const LocalManagedMemory::PendingRelease &a_entry = mem_->pending_releases.back();
+    ASSERT_EQ(A, a_entry.inst);
+    ASSERT_TRUE(a_entry.is_ready);
+    ASSERT_TRUE(a_entry.deferred_dealloc_notify);
+    ASSERT_TRUE(a_entry.redistrict_tags.empty()); // plain destroy
+  }
+
+  // Step 4: fire P's precondition - the oldest-path drain must sweep both
+  // entries without misapplying the offsets flavor to A's plain entry.
+  GenEventImpl::trigger(p_precondition, /*poisoned=*/false);
+
+  EXPECT_TRUE(mem_->pending_releases.empty());
+  EXPECT_TRUE(mem_->pending_allocs.empty());
+
+  // P1 keeps its own successful placement at offset 0 - a clobbered
+  // 'allocated' would have failure-notified it instead.
+  EXPECT_EQ(static_cast<size_t>(0), P1->metadata.inst_offset);
+  EXPECT_EQ(static_cast<size_t>(10), D->metadata.inst_offset);
+
+  // Both parents' slots recycle exactly once each.
+  EXPECT_TRUE(slot_on_free_list(P));
+  EXPECT_TRUE(slot_on_free_list(A));
+
+  // current_allocator agrees: P1 and D live at their notified offsets, P
+  // and A are gone, and A's 30-unit range is genuinely free again.
+  size_t first, size;
+  EXPECT_TRUE(mem_->current_allocator.lookup(P1->me, first, size));
+  EXPECT_EQ(0u, first);
+  EXPECT_TRUE(mem_->current_allocator.lookup(D->me, first, size));
+  EXPECT_EQ(10u, first);
+  EXPECT_FALSE(mem_->current_allocator.lookup(P->me, first, size));
+  EXPECT_FALSE(mem_->current_allocator.lookup(A->me, first, size));
+
+  RegionInstanceImpl *E = make_inst(30);
+  ASSERT_EQ(MemoryImpl::ALLOC_INSTANT_SUCCESS,
+            mem_->allocate_storage_deferrable(E, false, Event::NO_EVENT));
+  EXPECT_EQ(static_cast<size_t>(50), E->metadata.inst_offset);
+}
+
+// Redistrict-follower variant: the ready follower is *another redistrict*
+// with more children than old_inst.  The offsets flavor asserts
+// offsets.size() == redistrict_tags.size() in debug builds; in release
+// builds the follower's split_range writes child offsets past the end of
+// the caller's offsets vector (sized for old_inst's children) - an
+// out-of-bounds write - and 'allocated'/'offsets' then describe the
+// follower's children rather than old_inst's.
+//
+// Layout: P=50 at [0,50), Q=30 at [50,80), C=20 at [80,100) -> full.
+//   1. redistrict P -> {P1=10} deferred on an untriggered precondition.
+//   2. request D=40 -> ALLOC_DEFERRED against the future hole [10,50).
+//   3. triggered redistrict Q -> {Q1,Q2,Q3} (10 each): the reorder can't
+//      fit D, so Q's entry is queued ready behind P's with three
+//      redistrict tags (vs P's one).
+//   4. fire P's precondition - the drain sweeps Q's entry with the void
+//      flavor, which sizes its own offsets vector.
+TEST_F(DeferredAllocBadPathTest, ReuseOldestDrainSweepsRedistrictFollower)
+{
+  RegionInstanceImpl *P = make_inst(50);
+  RegionInstanceImpl *Q = make_inst(30);
+  RegionInstanceImpl *C = make_inst(20);
+  RegionInstanceImpl *D = make_inst(40);
+  RegionInstanceImpl *P1 = make_inst(10);
+  RegionInstanceImpl *Q1 = make_inst(10);
+  RegionInstanceImpl *Q2 = make_inst(10);
+  RegionInstanceImpl *Q3 = make_inst(10);
+
+  ASSERT_EQ(MemoryImpl::ALLOC_INSTANT_SUCCESS,
+            mem_->allocate_storage_deferrable(P, false, Event::NO_EVENT));
+  ASSERT_EQ(MemoryImpl::ALLOC_INSTANT_SUCCESS,
+            mem_->allocate_storage_deferrable(Q, false, Event::NO_EVENT));
+  ASSERT_EQ(MemoryImpl::ALLOC_INSTANT_SUCCESS,
+            mem_->allocate_storage_deferrable(C, false, Event::NO_EVENT));
+
+  Event p_precondition = GenEventImpl::create_genevent()->current_event();
+  std::vector<RegionInstanceImpl *> p_children = {P1};
+  ASSERT_EQ(MemoryImpl::ALLOC_DEFERRED,
+            mem_->reuse_storage_deferrable(P, p_children, p_precondition));
+
+  ASSERT_EQ(MemoryImpl::ALLOC_DEFERRED,
+            mem_->allocate_storage_deferrable(D, false, Event::NO_EVENT));
+
+  // Triggered redistrict of Q -> {Q1, Q2, Q3}.  The children exactly fill
+  // Q's [50,80) range, so the reorder still can't fit D=40 and Q's entry
+  // is queued ready with three redistrict tags.  The children are notified
+  // INSTANT_SUCCESS right here, with offsets carved from Q's own interval.
+  std::vector<RegionInstanceImpl *> q_children = {Q1, Q2, Q3};
+  ASSERT_EQ(MemoryImpl::ALLOC_INSTANT_SUCCESS,
+            mem_->reuse_storage_deferrable(Q, q_children, Event::NO_EVENT));
+  ASSERT_EQ(2u, mem_->pending_releases.size());
+  {
+    const LocalManagedMemory::PendingRelease &q_entry = mem_->pending_releases.back();
+    ASSERT_EQ(Q, q_entry.inst);
+    ASSERT_TRUE(q_entry.is_ready);
+    ASSERT_TRUE(q_entry.deferred_dealloc_notify);
+    ASSERT_EQ(3u, q_entry.redistrict_tags.size());
+  }
+  EXPECT_EQ(static_cast<size_t>(50), Q1->metadata.inst_offset);
+  EXPECT_EQ(static_cast<size_t>(60), Q2->metadata.inst_offset);
+  EXPECT_EQ(static_cast<size_t>(70), Q3->metadata.inst_offset);
+
+  GenEventImpl::trigger(p_precondition, /*poisoned=*/false);
+
+  EXPECT_TRUE(mem_->pending_releases.empty());
+  EXPECT_TRUE(mem_->pending_allocs.empty());
+
+  EXPECT_EQ(static_cast<size_t>(0), P1->metadata.inst_offset);
+  EXPECT_EQ(static_cast<size_t>(10), D->metadata.inst_offset);
+
+  // Q's children materialize in current_allocator at exactly the offsets
+  // they were promised when Q's entry was marked ready - child offsets are
+  // intrinsic to the parent's interval, which never moves.
+  size_t first, size;
+  EXPECT_TRUE(mem_->current_allocator.lookup(Q1->me, first, size));
+  EXPECT_EQ(50u, first);
+  EXPECT_TRUE(mem_->current_allocator.lookup(Q2->me, first, size));
+  EXPECT_EQ(60u, first);
+  EXPECT_TRUE(mem_->current_allocator.lookup(Q3->me, first, size));
+  EXPECT_EQ(70u, first);
+  EXPECT_FALSE(mem_->current_allocator.lookup(P->me, first, size));
+  EXPECT_FALSE(mem_->current_allocator.lookup(Q->me, first, size));
+
+  EXPECT_TRUE(slot_on_free_list(P));
+  EXPECT_TRUE(slot_on_free_list(Q));
+
+  // The heap is exactly full again: P1+D+Q1+Q2+Q3+C = 100.
+  EXPECT_FALSE(mem_->current_allocator.can_allocate(D->me, 1, 1));
+}
+
 // Exercises the bad-path branch in release_storage_immediate: a destroy is
 // queued with a deferred precondition (lands non-oldest in pending_releases),
 // then a pending alloc is queued, then the destroy's precondition fires.

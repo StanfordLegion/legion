@@ -34,6 +34,7 @@ namespace Realm {
     : finish_event(_finish_event)
     , finish_gen(_finish_gen)
     , refcount(1)
+    , finish_event_owns_ref(false)
     , state(ProfilingMeasurements::OperationStatus::WAITING)
     , requests(_requests)
     , all_work_items(0)
@@ -50,9 +51,13 @@ namespace Realm {
         measurements.wants_measurement<ProfilingMeasurements::OperationEventWaits>();
     if(wants_timeline)
       timeline.record_create_time();
-    finish_event->set_trigger_op(finish_gen, this);
-    finish_event->merger.prepare_merger(finish_event->make_event(finish_gen),
-                                        false /*ignore faults*/);
+    // hand our initial reference to the finish event - it is released when the
+    //  generation triggers (GenEventImpl::trigger) or, if the event declined to take
+    //  it, by us in trigger_finish_event()
+    finish_event_owns_ref = finish_event->set_trigger_op(finish_gen, this);
+    finish_event->merger.prepare_merger(
+        finish_event->make_event(finish_gen), false /*ignore faults*/,
+        std::optional<size_t>(), EventMerger::FaultPropagation::AFTER_PRECONDITIONS);
   }
 
   Operation::~Operation(void)
@@ -321,6 +326,9 @@ namespace Realm {
 
   void Operation::trigger_finish_event(bool poisoned)
   {
+    // if the finish event owns our reference, arming the merger below can trigger the
+    //  event and delete this operation, so read everything we need from 'this' first
+    const bool release_own_ref = !finish_event_owns_ref;
     if(poisoned) {
       // Pull a reference on to the stack because the poisoning could
       // cause "this" to be deleted right away
@@ -334,6 +342,11 @@ namespace Realm {
     // no operation table to decrement the refcount, so do it ourselves
     // SJT: should this always be done for operations without finish events?
     remove_reference();
+#else
+    // normally the finish event releases our reference when it triggers (see
+    //  GenEventImpl::trigger) - if it declined to take ownership, do it ourselves
+    if(release_own_ref)
+      remove_reference();
 #endif
   }
 

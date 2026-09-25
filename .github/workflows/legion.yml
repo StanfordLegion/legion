@@ -86,6 +86,8 @@ jobs:
         with:
           variant: ccache
           append-timestamp: true
+          save: ${{ github.ref == 'refs/heads/main' }}
+          evict-old-files: job
 
           key: legion-${{ env.LEGION_REF }}-realm-${{ github.ref_name }}
           restore-keys: |

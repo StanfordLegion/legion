@@ -126,13 +126,20 @@ namespace Realm {
 
   class EventMerger {
   public:
+    enum class FaultPropagation
+    {
+      EARLY,
+      AFTER_PRECONDITIONS,
+    };
+
     EventMerger(GenEventImpl *_event_impl);
     ~EventMerger(void);
 
     bool is_active(void) const;
 
     void prepare_merger(Event _finish_event, bool _ignore_faults,
-                        std::optional<size_t> expected_events = std::optional<size_t>());
+                        std::optional<size_t> expected_events = std::optional<size_t>(),
+                        FaultPropagation _fault_propagation = FaultPropagation::EARLY);
 
     void add_precondition(Event wait_for);
 
@@ -168,6 +175,7 @@ namespace Realm {
     EventImpl::gen_t finish_gen;
     unsigned precondition_offset;
     bool ignore_faults;
+    FaultPropagation fault_propagation;
     bool recycle_preconditions;
     atomic<int> count_needed;
     atomic<int> faults_observed;
@@ -253,8 +261,12 @@ namespace Realm {
     void process_update(gen_t current_gen, const gen_t *new_poisoned_generations,
                         int new_poisoned_count, TimeLimit work_until);
 
-    // Set the operation that will trigger this event's generation.
-    void set_trigger_op(gen_t gen, Operation *op);
+    // Set the operation that will trigger this event's generation.  On success the
+    // event takes ownership of the caller's reference to 'op' and releases it when
+    // 'gen' triggers, whether or not this node owns the event (see trigger()).
+    // Returns false if 'gen' has already been observed to trigger, in which case the
+    // caller keeps its reference.
+    bool set_trigger_op(gen_t gen, Operation *op);
     // Get the operation that will trigger this event's generation.
     // The returned operation's reference is incremented and must be removed by the
     // caller.
@@ -299,8 +311,11 @@ namespace Realm {
     // everything below here protected by this mutex
     Mutex mutex;
 
-    // The operation that will trigger this generation
+    // The operation that will trigger generation 'current_trigger_op_gen' - the event
+    //  holds a reference to it (see set_trigger_op).  For a remote event our view of
+    //  'generation' can lag the owner's, so the generation is tracked explicitly.
     Operation *current_trigger_op = nullptr;
+    gen_t current_trigger_op_gen = 0;
 
     // local waiters are tracked by generation - an easily-accessed list is used
     //  for the "current" generation, whereas a map-by-generation-id is used for
