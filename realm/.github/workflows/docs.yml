@@ -29,10 +29,10 @@ jobs:
     strategy:
       fail-fast: false
     steps:
-      - uses: awalsh128/cache-apt-pkgs-action@latest
-        name: Get Linux Packages
-        with:
-          packages: doxygen doxygen-latex graphviz cmake
+      - name: Get Linux Packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y doxygen doxygen-latex graphviz
 
       - uses: actions/checkout@v4.2.2
         with:

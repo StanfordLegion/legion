@@ -36,6 +36,7 @@ jobs:
       CCACHE_BASEDIR: ${{ github.workspace }}
       CCACHE_COMPRESS: "true"
       CCACHE_COMPRESS_LEVEL: "6"
+      CONFIG_KEY: ${{ matrix.config.os }}-${{ matrix.config.cc }}-${{ matrix.config.cuda }}-${{ matrix.config.build }}-${{ matrix.config.shared_lib }}-${{ matrix.config.openmp }}-${{ matrix.config.ucx }}-${{ matrix.config.gasnet }}-${{ matrix.config.python }}-${{ matrix.config.kokkos }}-${{ matrix.config.sanitizer }}
     strategy:
       fail-fast: false
       matrix:
@@ -279,11 +280,13 @@ jobs:
         with:
           variant: ${{ matrix.config.ccache }}
           append-timestamp: true
+          save: ${{ github.ref == 'refs/heads/main' }}
+          evict-old-files: job
 
-          key: ${{ matrix.config.os }}-${{ matrix.config.cc }}-${{ matrix.config.cuda }}-${{ matrix.config.build }}-${{ github.ref_name }}
+          key: ${{ env.CONFIG_KEY }}-${{ github.ref_name }}
           restore-keys: |
-            ${{ matrix.config.os }}-${{ matrix.config.cc }}-${{ matrix.config.cuda }}-${{ matrix.config.build }}-${{ github.ref_name }}
-            ${{ matrix.config.os }}-${{ matrix.config.cc }}-${{ matrix.config.cuda }}-${{ matrix.config.build }}-main
+            ${{ env.CONFIG_KEY }}-${{ github.ref_name }}
+            ${{ env.CONFIG_KEY }}-main
 
       - uses: microsoft/setup-msbuild@v2
         name: Setup Windows Build Environment
@@ -376,6 +379,8 @@ jobs:
       - name: Run Tests
         id: run-tests
         if: matrix.config.cuda == '' || steps.check_gpu.outputs.no_gpu != '1'
+        env:
+          UCX_TLS: "^ib"
         run:
           ctest --output-junit ${{ github.workspace }}/test-results.xml
                 --test-dir build
@@ -484,6 +489,8 @@ jobs:
         with:
           variant: ccache
           append-timestamp: true
+          save: ${{ github.ref == 'refs/heads/main' }}
+          evict-old-files: job
 
           key: ubuntu-24.04-${{ matrix.config.arch }}-${{ github.ref_name }}
           restore-keys: |
@@ -571,10 +578,10 @@ jobs:
     strategy:
       fail-fast: false
     steps:
-      - uses: awalsh128/cache-apt-pkgs-action@latest
-        name: Get Linux Packages
-        with:
-          packages: doxygen doxygen-latex graphviz cmake
+      - name: Get Linux Packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y doxygen doxygen-latex graphviz
 
       - uses: actions/checkout@v4.2.2
         with:
