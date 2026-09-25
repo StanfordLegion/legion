@@ -10035,8 +10035,6 @@ function codegen.stat_return(cx, node)
         value = buffer,
         size = buffer_size,
       }
-      -- A return may sit inside nested blocks or loops, so run the
-      -- cleanup items of every enclosing scope, not just the innermost.
       [cx:get_all_cleanup_items_for_return()]
       return
       -- Task wrapper is responsible for calling free.
