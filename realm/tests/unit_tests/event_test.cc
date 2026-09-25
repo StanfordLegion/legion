@@ -17,6 +17,7 @@
 
 #include "realm/event_impl.h"
 #include "realm/activemsg.h"
+#include "realm/operation.h"
 #include <tuple>
 #include <gtest/gtest.h>
 
@@ -31,9 +32,13 @@ public:
   bool triggered = false;
 };
 
-class MockEventCommunicator : public EventCommunicator {
+class EventTestCommunicator : public EventCommunicator {
 public:
-  virtual void trigger(Event event, NodeID owner, bool poisoned) { sent_trigger_count++; }
+  virtual void trigger(Event event, NodeID owner, bool poisoned)
+  {
+    sent_trigger_count++;
+    last_trigger_poisoned = poisoned;
+  }
 
   virtual void update(Event event, NodeID to_update,
                       span<EventImpl::gen_t> poisoned_generationse)
@@ -50,13 +55,59 @@ public:
   int sent_trigger_count = 0;
   int sent_subscription_count = 0;
   int sent_notification_count = 0;
+  bool last_trigger_poisoned = false;
+};
+
+// An Operation whose only job is to report when it is destroyed.  Constructed against
+//  an event owned by another node it mimics a Task that the owner spawned on this node
+//  via SpawnTaskMessage: the operation hands its reference to the finish event and
+//  relies on the event to release it when the generation triggers.
+class TestOperation : public Operation {
+public:
+  TestOperation(GenEventImpl *finish_event, EventImpl::gen_t finish_gen, bool *destroyed)
+    : Operation(finish_event, finish_gen, ProfilingRequestSet())
+    , destroyed(destroyed)
+  {}
+  virtual ~TestOperation(void) { *destroyed = true; }
+  virtual void print(std::ostream &os) const { os << "TestOperation"; }
+
+  // drive the operation through its normal lifecycle to completion
+  void run(void)
+  {
+    mark_ready();
+    mark_started();
+    mark_finished(true /*successful*/);
+  }
+
+  bool *destroyed;
+};
+
+// A communicator that plays the part of a remote owner which, on receiving our trigger
+//  for one generation, immediately recycles the event and spawns the next generation's
+//  operation back on this node.  GenEventImpl::trigger sends the trigger message before
+//  it updates local state, so doing the spawn inside trigger() lands the new operation
+//  in exactly that window.
+class RespawningEventCommunicator : public EventTestCommunicator {
+public:
+  virtual void trigger(Event event, NodeID owner, bool poisoned)
+  {
+    EventTestCommunicator::trigger(event, owner, poisoned);
+    if((spawned == nullptr) && (event_impl != nullptr)) {
+      spawned = new TestOperation(event_impl, respawn_gen, destroyed);
+    }
+  }
+
+  GenEventImpl *event_impl = nullptr;
+  EventImpl::gen_t respawn_gen = 0;
+  bool *destroyed = nullptr;
+  TestOperation *spawned = nullptr;
 };
 
 class GenEventTest : public ::testing::Test {
 protected:
   void SetUp() override
   {
-    event_comm = new MockEventCommunicator();
+    event_comm = new EventTestCommunicator();
     event_notifier = new EventTriggerNotifier();
   }
 
@@ -71,7 +122,7 @@ protected:
     delete event_notifier;
   }
 
-  MockEventCommunicator *event_comm;
+  EventTestCommunicator *event_comm;
   EventTriggerNotifier *event_notifier;
 };
 
@@ -255,7 +306,7 @@ TEST_F(GenEventTest, RemoteSubscribeNextGen)
 {
   const NodeID owner = 1;
   const GenEventImpl::gen_t subscribe_gen = 2;
-  MockEventCommunicator *event_comm = new MockEventCommunicator();
+  EventTestCommunicator *event_comm = new EventTestCommunicator();
   GenEventImpl event(event_notifier, event_comm);
 
   event.init(ID::make_event(0, 0, 0), owner);
@@ -268,7 +319,7 @@ TEST_F(GenEventTest, RemoteSubscribeCurrGen)
 {
   const NodeID owner = 1;
   const GenEventImpl::gen_t subscribe_gen = 1;
-  MockEventCommunicator *event_comm = new MockEventCommunicator();
+  EventTestCommunicator *event_comm = new EventTestCommunicator();
   GenEventImpl event(event_notifier, event_comm);
 
   event.init(ID::make_event(0, 0, 0), owner);
@@ -391,6 +442,187 @@ TEST_F(GenEventTest, HandleRemoteSubscriptionUntriggered)
 
   EXPECT_EQ(event_comm->sent_notification_count, 0);
   EXPECT_TRUE(event.remote_waiters.contains(sender));
+}
+
+// A task spawned here by the remote owner of its finish event hands its reference to
+//  that event; completing the task must release it.  (Regression: the reference was
+//  only released in the owner branch of GenEventImpl::trigger, leaking every such Task
+//  and its argument buffer until the same event slot happened to be reused.)
+TEST_F(GenEventTest, RemoteTriggerReleasesTriggerOp)
+{
+  const NodeID owner = 1;
+  const GenEventImpl::gen_t trigger_gen = 1;
+  bool poisoned = false;
+  bool destroyed = false;
+  GenEventImpl event(event_notifier, event_comm);
+  event.init(ID::make_event(0, 0, 0), owner);
+
+  TestOperation *op = new TestOperation(&event, trigger_gen, &destroyed);
+  ASSERT_EQ(event.current_trigger_op, op);
+  EXPECT_EQ(event.current_trigger_op_gen, trigger_gen);
+  EXPECT_FALSE(destroyed);
+
+  op->run();
+
+  EXPECT_EQ(event_comm->sent_trigger_count, 1);
+  EXPECT_TRUE(event.has_triggered(trigger_gen, poisoned));
+  EXPECT_FALSE(poisoned);
+  EXPECT_EQ(event.current_trigger_op, nullptr);
+  EXPECT_TRUE(destroyed);
+}
+
+// Our copy of a remote event only learns about generations through local triggers and
+//  owner updates, so the owner may hand us an operation for a generation well ahead of
+//  our 'generation'.  It must still be tracked (so cancellation can find it) and
+//  released when that generation triggers.
+TEST_F(GenEventTest, RemoteTriggerOpWithLaggingGeneration)
+{
+  const NodeID owner = 1;
+  const GenEventImpl::gen_t trigger_gen = 3;
+  bool poisoned = false;
+  bool destroyed = false;
+  GenEventImpl event(event_notifier, event_comm);
+  event.init(ID::make_event(0, 0, 0), owner);
+
+  TestOperation *op = new TestOperation(&event, trigger_gen, &destroyed);
+  ASSERT_EQ(event.current_trigger_op, op);
+  EXPECT_EQ(event.current_trigger_op_gen, trigger_gen);
+
+  Operation *found = event.get_trigger_op(trigger_gen);
+  EXPECT_EQ(found, op);
+  if(found != nullptr)
+    found->remove_reference();
+  EXPECT_EQ(event.get_trigger_op(trigger_gen - 1), nullptr);
+  EXPECT_FALSE(destroyed);
+
+  op->run();
+
+  EXPECT_EQ(event_comm->sent_trigger_count, 1);
+  EXPECT_TRUE(event.has_triggered(trigger_gen, poisoned));
+  EXPECT_EQ(event.current_trigger_op, nullptr);
+  EXPECT_TRUE(destroyed);
+}
+
+// trigger() tells the owner about a generation before updating our local state, so the
+//  owner can recycle the event and spawn the next generation's task here before our
+//  'generation' advances.  Installing the newer operation must release the older,
+//  already-triggered one, and the delayed local half of the older generation's trigger
+//  must leave the newer operation alone.
+TEST_F(GenEventTest, RemoteTriggerOpReplacedBeforeLocalUpdate)
+{
+  const NodeID owner = 1;
+  bool poisoned = false;
+  bool destroyed_one = false;
+  bool destroyed_two = false;
+  RespawningEventCommunicator *comm = new RespawningEventCommunicator();
+  GenEventImpl event(event_notifier, comm);
+  event.init(ID::make_event(0, 0, 0), owner);
+  comm->event_impl = &event;
+  comm->respawn_gen = 2;
+  comm->destroyed = &destroyed_two;
+
+  TestOperation *op_one = new TestOperation(&event, 1, &destroyed_one);
+  ASSERT_EQ(event.current_trigger_op, op_one);
+
+  // completing op_one sends the trigger for generation 1; the "owner" reacts inside
+  //  that send by spawning generation 2's operation here, before generation 1's local
+  //  state update has run
+  op_one->run();
+
+  ASSERT_NE(comm->spawned, nullptr);
+  EXPECT_EQ(comm->sent_trigger_count, 1);
+  EXPECT_TRUE(destroyed_one);
+  EXPECT_FALSE(destroyed_two);
+  EXPECT_EQ(event.current_trigger_op, comm->spawned);
+  EXPECT_EQ(event.current_trigger_op_gen, GenEventImpl::gen_t(2));
+  EXPECT_TRUE(event.has_triggered(1, poisoned));
+  EXPECT_FALSE(event.has_triggered(2, poisoned));
+
+  comm->spawned->run();
+
+  EXPECT_EQ(comm->sent_trigger_count, 2);
+  EXPECT_TRUE(event.has_triggered(2, poisoned));
+  EXPECT_EQ(event.current_trigger_op, nullptr);
+  EXPECT_TRUE(destroyed_two);
+}
+
+// Poison in a dynamically-added finish precondition must not destroy an operation or
+// report its finish event until the operation's main work item has also finished.
+TEST_F(GenEventTest, RemoteFinishPreconditionPoisonWaitsForOperation)
+{
+  const NodeID owner = 1;
+  const GenEventImpl::gen_t trigger_gen = 1;
+  bool poisoned = false;
+  bool destroyed = false;
+  GenEventImpl event(event_notifier, event_comm);
+  event.init(ID::make_event(0, 0, 0), owner);
+
+  TestOperation *op = new TestOperation(&event, trigger_gen, &destroyed);
+  ASSERT_TRUE(op->mark_ready());
+  ASSERT_TRUE(op->mark_started());
+
+  // Model a finish precondition that was registered by the running operation and then
+  // poisoned.  The merger's initial count represents the still-running main work item.
+  event.merger.get_next_precondition()->event_triggered(true /*poisoned*/,
+                                                        TimeLimit::responsive());
+
+  EXPECT_FALSE(event.has_triggered(trigger_gen, poisoned));
+  EXPECT_FALSE(destroyed);
+  EXPECT_EQ(event.current_trigger_op, op);
+  EXPECT_EQ(event_comm->sent_trigger_count, 0);
+
+  op->mark_finished(true /*successful*/);
+
+  EXPECT_TRUE(event.has_triggered(trigger_gen, poisoned));
+  EXPECT_TRUE(event_comm->last_trigger_poisoned);
+  EXPECT_EQ(event.current_trigger_op, nullptr);
+  EXPECT_TRUE(destroyed);
+}
+
+TEST_F(GenEventTest, LocalEventMergerDefersPoisonUntilAllPreconditions)
+{
+  const NodeID owner = 0;
+  // Prevent this stack-allocated event from being returned to the runtime's free list.
+  const GenEventImpl::gen_t trigger_gen = (1U << ID::EVENT_GENERATION_WIDTH) - 1;
+  bool poisoned = false;
+  GenEventImpl event(event_notifier, event_comm);
+  event.init(ID::make_event(0, 0, 0), owner);
+  event.generation.store(trigger_gen - 1);
+  event.merger.prepare_merger(event.make_event(trigger_gen), false /*ignore faults*/,
+                              std::optional<size_t>(),
+                              EventMerger::FaultPropagation::AFTER_PRECONDITIONS);
+
+  event.merger.get_next_precondition()->event_triggered(true /*poisoned*/,
+                                                        TimeLimit::responsive());
+
+  EXPECT_FALSE(event.has_triggered(trigger_gen, poisoned));
+
+  // The arm models the operation's main work item reaching completion.
+  event.merger.arm_merger();
+
+  EXPECT_TRUE(event.has_triggered(trigger_gen, poisoned));
+  EXPECT_TRUE(poisoned);
+}
+
+// The delayed policy above is operation-specific.  Ordinary event mergers retain their
+// existing eager poison propagation behavior.
+TEST_F(GenEventTest, EventMergerStillPropagatesPoisonEarlyByDefault)
+{
+  const NodeID owner = 1;
+  const GenEventImpl::gen_t trigger_gen = 1;
+  bool poisoned = false;
+  GenEventImpl event(event_notifier, event_comm);
+  event.init(ID::make_event(0, 0, 0), owner);
+  event.merger.prepare_merger(event.make_event(trigger_gen), false /*ignore faults*/);
+
+  event.merger.get_next_precondition()->event_triggered(true /*poisoned*/,
+                                                        TimeLimit::responsive());
+
+  EXPECT_TRUE(event.has_triggered(trigger_gen, poisoned));
+  EXPECT_TRUE(event_comm->last_trigger_poisoned);
+
+  // Supply the merger's arm count so it can retire its precondition storage.
+  event.merger.arm_merger();
 }
 
 TEST_F(GenEventTest, RemoteTrigger)

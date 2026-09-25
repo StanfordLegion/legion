@@ -347,8 +347,8 @@ namespace PRealm {
       TASK_ID_PROCESSOR_NOP = Realm::Processor::TASK_ID_PROCESSOR_NOP,
       TASK_ID_PROCESSOR_INIT = Realm::Processor::TASK_ID_PROCESSOR_INIT,
       TASK_ID_PROCESSOR_SHUTDOWN = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
-      // Increment this by 3 to reserve some task IDs for our profiling work
-      TASK_ID_FIRST_AVAILABLE = Realm::Processor::TASK_ID_FIRST_AVAILABLE + 5,
+      // Increment this to reserve some task IDs for our profiling work
+      TASK_ID_FIRST_AVAILABLE = Realm::Processor::TASK_ID_FIRST_AVAILABLE + 6,
     };
 
     static const Processor NO_PROC;
@@ -489,9 +489,16 @@ namespace PRealm {
     // profiling
     Event unique_event;
   };
+  static_assert(sizeof(RegionInstance) == sizeof(Realm::RegionInstance) + sizeof(Event));
   // Even though we add extra data to the RegionInstance in the form of a
   // unique event for naming the instance, the struct should still be packed
+#ifndef __CUDACC__
+  // Turns out this assertion is too hard for some compilers to prove
+  // (looking at you nvcc) so we weaken it for those cases
   static_assert(std::has_unique_object_representations_v<RegionInstance>);
+#else
+  static_assert(std::is_trivially_copyable_v<RegionInstance>);
+#endif
   using Realm::ExternalFileResource;
   using Realm::ExternalMemoryResource;
 

@@ -66,12 +66,18 @@ namespace PRealm {
       } id;
       ProfKind kind;
     };
+    enum EffectKind {
+      ASYNC_EFFECT,
+      MAKE_VALID_EFFECT,
+      FETCH_METADATA_EFFECT,
+    };
     struct ExternalTriggerArgs {
       Event external;
       Event fevent;
       Processor proc;
       unsigned long long provenance;
       std::optional<long long> start_time;
+      EffectKind kind;
     };
     struct ProcDesc {
     public:
@@ -249,6 +255,21 @@ namespace PRealm {
       Event creator, fevent;
       unsigned long long provenance;
     };
+    struct MakeValidInfo {
+    public:
+      Event result;
+      Event fevent;
+      timestamp_t created;
+      timestamp_t triggered;
+    };
+    struct FetchMetadataInfo {
+    public:
+      Event result;
+      Event fevent;
+      Event inst_uid;
+      timestamp_t created;
+      timestamp_t triggered;
+    };
     struct SpawnInfo {
     public:
       Event fevent;
@@ -257,6 +278,9 @@ namespace PRealm {
 
   public:
     ThreadProfiler(Processor p, Realm::Event implicit);
+  private:
+    ThreadProfiler(Processor p, Realm::Event implicit, long long start);
+  public:
     ThreadProfiler(const ThreadProfiler &rhs) = delete;
     ThreadProfiler &operator=(const ThreadProfiler &rhs) = delete;
 
@@ -267,7 +291,8 @@ namespace PRealm {
                           const std::vector<CopySrcDstField> &srcs,
                           const std::vector<CopySrcDstField> &dsts, Event critical);
     void add_task_request(ProfilingRequestSet &requests, Processor::TaskFuncID task_id,
-                          Event critical, Event fevent, timestamp_t spawn_time = 0);
+                          Processor target, Event critical, Event fevent,
+                          timestamp_t spawn_time = 0);
     Event add_inst_request(ProfilingRequestSet &requests, Event critical);
 
   public:
@@ -286,6 +311,8 @@ namespace PRealm {
     void record_external_event(
         Realm::Event result, const std::string_view &prov,
         std::optional<long long> start_time = std::optional<long long>());
+    void record_make_valid(Event event);
+    void record_fetch_metadata(Event event, Event inst_uid);
     void record_reservation_acquire(Reservation r, Event result, Event precondition);
     Event record_instance_ready(RegionInstance inst, Event result, Event precondition);
     void record_instance_usage(RegionInstance inst, FieldID field_id, timestamp_t start,
@@ -294,7 +321,8 @@ namespace PRealm {
     void process_trigger(const void *args, size_t arglen);
     void process_external(ProfilingResponse &response);
     void record_time_range(long long start, const std::string_view &name, Event external);
-    size_t dump_inter(long long target_latency);
+    ThreadProfiler* dump(void);
+    bool dump_inter(long long t_stop);
     void finalize(void);
 
     static ThreadProfiler &get_thread_profiler(void);
@@ -303,6 +331,10 @@ namespace PRealm {
     const Processor local_proc;
     const Realm::Event implicit_fevent;
     const long long start_time;
+  public:
+    // For creating lock-free linked lists of profiler instances for dumping
+    std::atomic<ThreadProfiler*> next = nullptr;
+    size_t footprint = 0;
 
   private:
     std::deque<EventWaitInfo> event_wait_infos;
@@ -322,6 +354,8 @@ namespace PRealm {
     std::deque<ProfTaskInfo> prof_task_infos;
     std::deque<ApplicationInfo> application_infos;
     std::deque<AsyncEffectInfo> async_effect_infos;
+    std::deque<MakeValidInfo> make_valid_infos;
+    std::deque<FetchMetadataInfo> fetch_metadata_infos;
     std::deque<SpawnInfo> spawn_infos;
     std::vector<ProcID> proc_ids;
     std::vector<MemID> mem_ids;
@@ -882,7 +916,9 @@ namespace PRealm {
 
   inline Event RegionInstance::fetch_metadata(Processor target) const
   {
-    return Realm::RegionInstance::fetch_metadata(target);
+    const Event result = Realm::RegionInstance::fetch_metadata(target);
+    ThreadProfiler::get_thread_profiler().record_fetch_metadata(result, unique_event);
+    return result;
   }
 
   template <int N, typename T>
@@ -1214,6 +1250,14 @@ namespace PRealm {
       alt_dsts[idx] = dsts[idx];
     return Realm::Rect<N, T>::copy(alt_srcs, alt_dsts, mask, alt_requests, wait_on,
                                    priority);
+  }
+
+  template <int N, typename T>
+  inline Event IndexSpace<N, T>::make_valid(bool precise) const
+  {
+    const Event result = Realm::IndexSpace<N, T>::make_valid(precise);
+    ThreadProfiler::get_thread_profiler().record_make_valid(result);
+    return result;
   }
 
   template <int N, typename T>

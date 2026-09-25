@@ -731,6 +731,7 @@ namespace Realm {
 
   EventMerger::EventMerger(GenEventImpl *_event_impl)
     : event_impl(_event_impl)
+    , fault_propagation(FaultPropagation::EARLY)
     , count_needed(0)
   {
     for(unsigned i = 0; i < MAX_INLINE_PRECONDITIONS; i++)
@@ -746,7 +747,8 @@ namespace Realm {
   bool EventMerger::is_active(void) const { return (count_needed.load() != 0); }
 
   void EventMerger::prepare_merger(Event _finish_event, bool _ignore_faults,
-                                   std::optional<size_t> expected_events)
+                                   std::optional<size_t> expected_events,
+                                   FaultPropagation _fault_propagation)
   {
     assert(!is_active());
     finish_gen = ID(_finish_event).event_generation();
@@ -764,6 +766,7 @@ namespace Realm {
     }
     precondition_offset = 0;
     ignore_faults = _ignore_faults;
+    fault_propagation = _fault_propagation;
     count_needed.store(1); // this matches the subsequent call to arm()
     faults_observed.store(0);
   }
@@ -783,7 +786,8 @@ namespace Realm {
       if(poisoned) {
         // always count faults, but don't necessarily propagate
         bool first_fault = (faults_observed.fetch_add(1) == 0);
-        if(first_fault && !ignore_faults) {
+        if(first_fault && !ignore_faults &&
+           (fault_propagation == FaultPropagation::EARLY)) {
           log_poison.info() << "event merger early poison: after="
                             << event_impl->make_event(finish_gen);
           bool free_event =
@@ -843,10 +847,13 @@ namespace Realm {
   void EventMerger::precondition_triggered(bool poisoned, TimeLimit work_until,
                                            MergeEventPrecondition *precondition)
   {
-    // if the input is poisoned, we propagate that poison eagerly
+    // Remember any poison, and propagate it immediately when requested.  Some mergers
+    // (notably operation finish events) must wait for every precondition before they can
+    // safely report completion, even when the final result is already known to be poison.
     if(poisoned) {
       bool first_fault = (faults_observed.fetch_add(1) == 0);
-      if(first_fault && !ignore_faults) {
+      if(first_fault && !ignore_faults &&
+         (fault_propagation == FaultPropagation::EARLY)) {
         log_poison.info() << "event merger poisoned: after="
                           << event_impl->make_event(finish_gen);
         bool free_event = event_impl->trigger(finish_gen, Network::my_node_id,
@@ -893,10 +900,15 @@ namespace Realm {
       if(!overflow_preconditions.empty()) {
         overflow_preconditions.clear();
       }
-      // trigger on the last input event, unless we did an early poison propagation
-      if(ignore_faults || (faults_observed.load() == 0)) {
+      const bool any_faults = (faults_observed.load() != 0);
+      // Trigger on the last input unless an eagerly propagated poison already did so.
+      // Deferred fault propagation reports the accumulated poison now that all inputs
+      // (including the merger's arm) have arrived.
+      if(ignore_faults || !any_faults ||
+         (fault_propagation == FaultPropagation::AFTER_PRECONDITIONS)) {
+        const bool trigger_poisoned = !ignore_faults && any_faults;
         bool free_event = event_impl->trigger(finish_gen, Network::my_node_id,
-                                              false /*!poisoned*/, work_until);
+                                              trigger_poisoned, work_until);
         if(free_event) {
           get_runtime()->local_event_free_list->free_entry(event_impl);
         }
@@ -1562,37 +1574,49 @@ namespace Realm {
     }
   }
 
-  void GenEventImpl::set_trigger_op(gen_t gen, Operation *op)
+  bool GenEventImpl::set_trigger_op(gen_t gen, Operation *op)
   {
-    if(REALM_LIKELY(generation.load() + 1 == gen)) {
+    // The owner hands out generations in order, so for a local event 'gen' is always
+    //  generation+1.  For a remote event (i.e. an operation the owner spawned on this
+    //  node) our view of 'generation' only advances on local triggers and owner updates,
+    //  so it can lag behind - accept any generation we have not yet seen trigger, or
+    //  the operation would have no owner for its reference at all.
+    if(REALM_LIKELY(gen > generation.load())) {
       AutoLock<> a(mutex);
-      if(REALM_LIKELY(generation.load() + 1 == gen)) {
+      if(REALM_LIKELY(gen > generation.load())) {
         assert(ID(op->get_finish_event()).event_gen_event_idx() ==
                ID(this->me).event_gen_event_idx());
-        // Make sure to drop the reference of a previous operation
+        assert((Network::my_node_id != owner) || (gen == (generation.load() + 1)));
+        // Make sure to drop the reference of a previous operation - it can only still
+        //  be here if its generation has already triggered but trigger() has not yet
+        //  updated our local state (it sends the trigger message to the owner first)
         if(current_trigger_op != nullptr) {
+          assert(current_trigger_op_gen < gen);
+#ifdef REALM_USE_OPERATION_TABLE
           current_trigger_op->remove_reference();
+#endif
         }
         // No need to add a reference to the operation here
         // as we inherit the reference from the caller
         current_trigger_op = op;
+        current_trigger_op_gen = gen;
         if(Network::my_node_id == owner) {
           get_runtime()->num_untriggered_events.fetch_add(1);
         }
+        return true;
       }
     }
+    return false;
   }
 
   Operation *GenEventImpl::get_trigger_op(gen_t gen)
   {
     Operation *op = nullptr;
-    if(REALM_LIKELY(generation.load() + 1 == gen)) {
+    if(REALM_LIKELY(gen > generation.load())) {
       AutoLock<> a(mutex);
-      if(REALM_LIKELY(generation.load() + 1 == gen)) {
+      if((current_trigger_op != nullptr) && (current_trigger_op_gen == gen)) {
         op = current_trigger_op;
-        if(op != nullptr) {
-          op->add_reference();
-        }
+        op->add_reference();
       }
     }
     return op;
@@ -1737,6 +1761,10 @@ namespace Realm {
                       << " (poisoned=" << poisoned << ")";
 
     EventWaiter::EventWaiterList to_wake;
+    // the operation (if any) whose completion triggered this generation - the event
+    //  holds its reference (see set_trigger_op), which we release below once we are
+    //  outside the mutex
+    Operation *trigger_op_to_release = nullptr;
 
     if(Network::my_node_id == owner) {
       // we own this event
@@ -1771,12 +1799,8 @@ namespace Realm {
 
         // Drop the trigger operation now that this event has been triggered
         if(current_trigger_op != nullptr) {
-#ifdef REALM_USE_OPERATION_TABLE
-          // If the operation table is not in play, the operation will hold it's own
-          // reference and clean it up Otherwise, this is a local operation and the event
-          // owns the reference, so clean it up.
-          current_trigger_op->remove_reference();
-#endif // REALM_USE_OPERATION_TABLE
+          assert(current_trigger_op_gen == gen_triggered);
+          trigger_op_to_release = current_trigger_op;
           current_trigger_op = nullptr;
           get_runtime()->num_untriggered_events.fetch_sub(1);
         }
@@ -1829,6 +1853,16 @@ namespace Realm {
       // now update our version of the data structure
       {
         AutoLock<> a(mutex);
+
+        // if an operation on this node (e.g. a task the owner spawned here) was
+        //  responsible for triggering this generation, the event holds its reference -
+        //  drop it just like the owner does above.  Match on the generation rather than
+        //  on 'generation+1': our view of 'generation' can lag, and a newer operation
+        //  may already have been installed for a later generation (see set_trigger_op)
+        if((current_trigger_op != nullptr) && (current_trigger_op_gen == gen_triggered)) {
+          trigger_op_to_release = current_trigger_op;
+          current_trigger_op = nullptr;
+        }
 
         gen_t cur_gen = generation.load();
         // is this the "next" version?
@@ -1898,6 +1932,18 @@ namespace Realm {
       if(subscribe_needed) {
         event_comm->subscribe(make_event(gen_triggered), owner, previous_subscribe_gen);
       }
+    }
+
+    // release the triggering operation's reference (this may delete it, so do it
+    //  outside the mutex)
+    if(trigger_op_to_release != nullptr) {
+#ifdef REALM_USE_OPERATION_TABLE
+      trigger_op_to_release->remove_reference();
+#else
+      // without the operation table the operation holds its own reference and releases
+      //  it in Operation::trigger_finish_event
+      (void)trigger_op_to_release;
+#endif
     }
 
     // finally, trigger any local waiters
