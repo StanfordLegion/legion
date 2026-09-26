@@ -1,6 +1,22 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
+Version 26.09.0
+ * Legion
+    - Work was done this quarter to formalize several important
+      internal distributed systems protocols in Legion with TLA+
+      and then model check their execution using TLC. This work
+      uncovered a number of bugs which are now fixed in these
+      protocols. While you cannot prove correctness with TLC, model
+      checking runs for many days have been unable to find new bugs.
+  * Realm
+    - Realm now has support for Kokkos 5 in its Kokkos module
+    - Several minor memory leaks were fixed as well
+  * Tools
+    - The Legion Prof liveness analysis now has a much improved
+      algorithm that should result in much more snappy processing
+      of logs and rendering of the liveness of instances.
+
 Version 26.06.0 (June 30, 2026)
   * Legion
     - The emphasis on this release was fixing stability bugs. Legion
