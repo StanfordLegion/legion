@@ -708,6 +708,8 @@ namespace Legion {
     void LegionProfInstance::record_event_trigger(LgEvent result, LgEvent pre)
     //--------------------------------------------------------------------------
     {
+      // Every record here belongs to a profiled task
+      legion_assert(implicit_fevent.exists());
       if (owner->no_critical_paths)
         return;
       EventTriggerInfo& info =
@@ -739,6 +741,8 @@ namespace Legion {
     void LegionProfInstance::record_event_poison(LgEvent result)
     //--------------------------------------------------------------------------
     {
+      // Every record here belongs to a profiled task
+      legion_assert(implicit_fevent.exists());
       if (owner->no_critical_paths)
         return;
       EventPoisonInfo& info =
@@ -1748,6 +1752,8 @@ namespace Legion {
         LgEvent event, ProvenanceID pid, Realm::Backtrace& bt)
     //--------------------------------------------------------------------------
     {
+      // Every record here belongs to a profiled task
+      legion_assert(implicit_fevent.exists());
       // Check to see if we have a backtrace ID for this backtrace yet
       unsigned long long backtrace_id = owner->find_backtrace_id(bt);
       event_wait_infos.emplace_back(EventWaitInfo{
@@ -2377,8 +2383,8 @@ namespace Legion {
         const bool all_arrivals)
       : done_event(Realm::UserEvent::create_user_event()),
         minimum_call_threshold(call_threshold * 1000 /*convert us to ns*/),
-        output_footprint_threshold(footprint_threshold),
         output_target_latency(target_latency), target_proc(target),
+        output_footprint_threshold(footprint_threshold),
         self_profile(self_prof), no_critical_paths(no_critical),
 #ifdef LEGION_DEBUG_COLLECTIVES
         // Can't rely on the barrier reduction in this case
@@ -3375,12 +3381,14 @@ namespace Legion {
     void LegionProfiler::finalize(void)
     //--------------------------------------------------------------------------
     {
+      // The loop below writes out every instance itself
+      finalizing.store(true);
       // Remove our guard outstanding request
       decrement_total_outstanding_requests(LEGION_PROF_META);
       CalibrationErr calibration_err;
       calibration_err.calibration_err = Realm::Clock::get_calibration_error();
       if (!done_event.has_triggered())
-        done_event.wait();
+        LgEvent(done_event).wait();
       // Make sure the last dumping task is done as well
       if (!last_dump_task.has_triggered())
         last_dump_task.wait();
@@ -3589,7 +3597,7 @@ namespace Legion {
       // therefore it is not safe to take a lock and try to wait again
       inst->footprint += diff;
       size_t footprint = total_memory_footprint.fetch_add(diff) + diff;
-      if (footprint > output_footprint_threshold)
+      if ((footprint > output_footprint_threshold) && !finalizing.load())
       {
         // Extract a new prof instance so we can dump out its current state
         // and save the clone as the new implicit profiler
@@ -3621,7 +3629,8 @@ namespace Legion {
       // update_footprint from the instances, so we need to be careful
       size_t footprint = total_memory_footprint.fetch_add(diff) + diff;
       LegionProfInstance* head = dump_list.load();
-      if ((footprint > output_footprint_threshold) && (head == nullptr) &&
+      if ((footprint > output_footprint_threshold) && !finalizing.load() &&
+          (head == nullptr) &&
           dump_list.compare_exchange_strong(
               head, reinterpret_cast<LegionProfInstance*>(DUMP_NOW)))
       {
