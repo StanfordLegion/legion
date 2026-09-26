@@ -1068,12 +1068,12 @@ namespace Legion {
       const Realm::UserEvent done_event;
       // Minimum duration of mapper and runtime calls for logging in ns
       const long long minimum_call_threshold;
-      // Size in bytes of the footprint before we start dumping
-      const size_t output_footprint_threshold;
       // The goal size in microseconds of the output tasks
       const long long output_target_latency;
       // Target processor on which to launch jobs
       const Processor target_proc;
+      // Size in bytes of the footprint before we start dumping
+      const size_t output_footprint_threshold;
       // Whether we are self-profiling
       const bool self_profile;
       // Whether we are profiling for critical path
@@ -1082,6 +1082,10 @@ namespace Legion {
       // or we are doing a reduction with the barrier to compute it
       const bool all_critical_arrivals;
     private:
+      // Set once finalize starts; no footprint-driven dump may begin after
+      // that, its meta-task would add a profiling request after the count
+      // finalize waits on has reached zero
+      std::atomic<bool> finalizing = false;
       LegionProfSerializer* serializer;
       mutable LocalLock profiler_lock;
       std::atomic<LegionProfInstance*> instances = nullptr;

@@ -113,14 +113,27 @@ namespace Legion {
     void LgEvent::end_wait(Context ctx, bool from_application) const
     //--------------------------------------------------------------------------
     {
-      if ((runtime->profiler != nullptr) && (implicit_profiler == nullptr) &&
-          implicit_fevent.exists())
+      if (runtime->profiler != nullptr)
       {
-        // This can occur when a (meta-)task that was previously running,
-        // but waited on a event, and Realm wakes it up on a new kernel
-        // thread that has never run a task before and therefore hasn't
-        // been assigned an implicit profiler yet
-        runtime->profiler->instantiate_profiling_instance();
+        if (implicit_fevent.exists())
+        {
+          if (implicit_profiler == nullptr)
+          {
+            // This can occur when a (meta-)task that was previously running,
+            // but waited on a event, and Realm wakes it up on a new kernel
+            // thread that has never run a task before and therefore hasn't
+            // been assigned an implicit profiler yet
+            runtime->profiler->instantiate_profiling_instance();
+          }
+        }
+        else if (
+            (implicit_profiler != nullptr) &&
+            !implicit_profiler->is_external_thread())
+        {
+          // An unprofiled task woke up on a kernel thread whose last task
+          // left its profiler behind, and must not record on its behalf.
+          implicit_profiler = nullptr;
+        }
       }
       if (ctx != nullptr)
         ctx->end_wait(*this, from_application);
@@ -13189,6 +13202,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // We don't profile this task
+      implicit_profiler = nullptr;
       implicit_fevent = LgEvent::NO_LG_EVENT;
       // Finalize the runtime and then delete it
       std::vector<Realm::Event> shutdown_events;
