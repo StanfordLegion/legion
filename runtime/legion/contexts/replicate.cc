@@ -8524,7 +8524,7 @@ namespace Legion {
       derez.deserialize(num_deleted_fields);
       std::vector<DeletedField> deleted_fids(num_deleted_fields);
       for (unsigned idx = 0; idx < num_deleted_fields; idx++)
-        deleted_fields[idx].deserialize(derez);
+        deleted_fids[idx].deserialize(derez);
       size_t num_created_field_spaces;
       derez.deserialize(num_created_field_spaces);
       std::map<FieldSpace, unsigned> created_fs;
