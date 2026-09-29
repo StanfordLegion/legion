@@ -582,7 +582,8 @@ namespace Legion {
           {
             // Make a canonical ready event
             request = Runtime::create_rt_user_event();
-            semantic_info[tag] = SemanticInfo(request);
+            semantic_field_info[std::pair<FieldID, SemanticTag>(fid, tag)] =
+                SemanticInfo(request);
             wait_on = request;
           }
           else if (is_remote)
@@ -2282,52 +2283,6 @@ namespace Legion {
       }
       if (!local_indexes.empty())
         ctx->get_local_field_set(handle, local_indexes, to_set);
-    }
-
-    //--------------------------------------------------------------------------
-    void FieldSpaceNode::get_field_set(
-        const FieldMask& mask, const std::set<FieldID>& basis,
-        std::set<FieldID>& to_set) const
-    //--------------------------------------------------------------------------
-    {
-      {
-        AutoLock n_lock(node_lock, false /*exclusive*/);
-        while (allocation_state == FIELD_ALLOC_PENDING)
-        {
-          legion_assert(is_owner());
-          const RtEvent wait_on = pending_field_allocation;
-          n_lock.release();
-          if (!wait_on.has_triggered())
-            wait_on.wait();
-          n_lock.reacquire();
-        }
-        if (allocation_state != FIELD_ALLOC_INVALID)
-        {
-          // Only iterate over the basis fields here
-          for (const FieldID& fid : basis)
-          {
-            std::map<FieldID, FieldInfo>::const_iterator finder =
-                field_infos.find(fid);
-            legion_assert(finder != field_infos.end());
-            if (mask.is_set(finder->second.idx))
-              to_set.insert(finder->first);
-          }
-          return;
-        }
-      }
-      std::map<FieldID, FieldInfo> local_infos;
-      const RtEvent ready = request_field_infos_copy(&local_infos, local_space);
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
-      // Only iterate over the basis fields here
-      for (const FieldID& fid : basis)
-      {
-        std::map<FieldID, FieldInfo>::const_iterator finder =
-            local_infos.find(fid);
-        legion_assert(finder != local_infos.end());
-        if (mask.is_set(finder->second.idx))
-          to_set.insert(finder->first);
-      }
     }
 
     //--------------------------------------------------------------------------

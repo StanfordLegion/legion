@@ -235,16 +235,12 @@ namespace Legion {
       size_t get_field_size(FieldID fid);
       CustomSerdezID get_field_serdez(FieldID fid);
       void get_all_fields(std::vector<FieldID>& to_set);
-      void get_all_regions(std::set<LogicalRegion>& regions);
       void get_field_set(
           const FieldMask& mask, TaskContext* context,
           std::set<FieldID>& to_set) const;
       void get_field_set(
           const FieldMask& mask, TaskContext* context,
           std::vector<FieldID>& to_set) const;
-      void get_field_set(
-          const FieldMask& mask, const std::set<FieldID>& basis,
-          std::set<FieldID>& to_set) const;
     public:
       FieldMask get_field_mask(const std::set<FieldID>& fields) const;
       unsigned get_field_index(FieldID fid) const;

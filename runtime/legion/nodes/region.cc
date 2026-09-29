@@ -1516,21 +1516,10 @@ namespace Legion {
           for (lng::map<SemanticTag, SemanticInfo>::iterator it =
                    semantic_info.begin();
                it != semantic_info.end(); it++)
-          {
-            LogicalRegionSemanticInfoResponse rez2;
-            {
-              RezCheck z(rez2);
-              rez2.serialize(handle);
-              rez2.serialize(initialized);
-              rez2.serialize<size_t>(1);
-              rez2.serialize(it->first);
-              rez2.serialize(it->second.buffer.get_size());
-              rez2.serialize(
-                  it->second.buffer.get_buffer(), it->second.buffer.get_size());
-              rez2.serialize(it->second.is_mutable);
-            }
-            rez2.dispatch(target);
-          }
+            send_semantic_info(
+                target, it->first, it->second.buffer.get_buffer(),
+                it->second.buffer.get_size(), it->second.is_mutable,
+                RtUserEvent::NO_RT_USER_EVENT);
         }
         else
         {
@@ -2208,19 +2197,10 @@ namespace Legion {
         for (lng::map<SemanticTag, SemanticInfo>::iterator it =
                  semantic_info.begin();
              it != semantic_info.end(); it++)
-        {
-          LogicalPartitionSemanticInfoResponse rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(handle);
-            rez.serialize(it->first);
-            rez.serialize(it->second.buffer.get_size());
-            rez.serialize(
-                it->second.buffer.get_buffer(), it->second.buffer.get_size());
-            rez.serialize(it->second.is_mutable);
-          }
-          rez.dispatch(target);
-        }
+          send_semantic_info(
+              target, it->first, it->second.buffer.get_buffer(),
+              it->second.buffer.get_size(), it->second.is_mutable,
+              RtUserEvent::NO_RT_USER_EVENT);
       }
     }
 

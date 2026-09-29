@@ -119,6 +119,10 @@ namespace Legion {
       // Remote references removed by DistributedCollectable destructor
       if (!is_owner() && !is_external_instance())
         memory_manager->unregister_remote_instance(this);
+      // The piece list is malloc'ed by the instance builder or the remote
+      // unpack path, and the manager owns it from construction onward.
+      if (piece_list != nullptr)
+        free(const_cast<void*>(piece_list));
       if (padded_reservations != nullptr)
       {
         // If this is the owner view, delete any atomic reservations

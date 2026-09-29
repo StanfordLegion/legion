@@ -468,7 +468,6 @@ namespace Legion {
           std::set<RtEvent>& applied);
     public:
       void get_all_fields(FieldSpace handle, std::set<FieldID>& fields);
-      void get_all_regions(FieldSpace handle, std::set<LogicalRegion>& regions);
       size_t get_coordinate_size(IndexSpace handle, bool range);
       size_t get_field_size(FieldSpace handle, FieldID fid);
       CustomSerdezID get_field_serdez(FieldSpace handle, FieldID fid);
