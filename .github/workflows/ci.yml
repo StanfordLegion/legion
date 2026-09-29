@@ -246,7 +246,11 @@ jobs:
       # allow it to be cached
       - name: Get Linux OpenMPI
         if: ${{ startsWith(matrix.config.os, 'ubuntu') }}
-        run: $(which sudo) apt install -yy libopenmpi-dev
+        # refresh the package index first - the runner image's baked-in lists go
+        # stale and then point at .debs that have since been removed from the archive
+        run: |
+          $(which sudo) apt-get update
+          $(which sudo) apt-get install -yy libopenmpi-dev
 
       - uses: Jimver/cuda-toolkit@v0.2.27
         name: Get CUDA
