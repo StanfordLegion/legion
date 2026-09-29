@@ -61,7 +61,11 @@ jobs:
       # Unfortunately the openmpi package does a bunch of things that doesn't
       # allow it to be cached
       - name: Get Linux OpenMPI
-        run: $(which sudo) apt install -yy libopenmpi-dev
+        # refresh the package index first - the runner image's baked-in lists go
+        # stale and then point at .debs that have since been removed from the archive
+        run: |
+          $(which sudo) apt-get update
+          $(which sudo) apt-get install -yy libopenmpi-dev
 
       - name: Checkout Legion
         run: git clone --depth=1 --branch ${{ env.LEGION_REF }} http://gitlab.com/StanfordLegion/legion.git ${{ github.workspace }}
