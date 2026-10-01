@@ -2962,7 +2962,7 @@ namespace Legion {
       PhysicalManager* manager =
           runtime->find_or_request_instance_manager(manager_did, manager_ready);
 
-      std::vector<ApEvent>* target;
+      std::set<ApEvent>* target;
       derez.deserialize(target);
       RegionUsage usage;
       derez.deserialize(usage);

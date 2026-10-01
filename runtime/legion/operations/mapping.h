@@ -178,8 +178,6 @@ namespace Legion {
       virtual RtEvent perform_collective_versioning_analysis(
           unsigned index, LogicalRegion handle, EqSetTracker* tracker,
           const FieldMask& mask, unsigned parent_req_index) override;
-      virtual bool find_shard_participants(
-          std::vector<ShardID>& shards) override;
     protected:
       CollectiveID mapping_check, sources_check;
       RtBarrier collective_map_barrier;

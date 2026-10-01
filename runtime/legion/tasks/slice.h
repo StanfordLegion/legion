@@ -149,8 +149,6 @@ namespace Legion {
       virtual void complete_replay(ApEvent instance_ready_event) override;
     public:
       virtual size_t get_collective_points(void) const override;
-      virtual bool find_shard_participants(
-          std::vector<ShardID>& shards) override;
       virtual RtEvent perform_collective_versioning_analysis(
           unsigned index, LogicalRegion handle, EqSetTracker* tracker,
           const FieldMask& mask, unsigned parent_req_index) override;

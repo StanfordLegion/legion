@@ -178,8 +178,6 @@ namespace Legion {
       virtual void trigger_complete(ApEvent effects_done) override;
       virtual void trigger_commit(void) override;
       virtual size_t get_collective_points(void) const override;
-      virtual bool find_shard_participants(
-          std::vector<ShardID>& shards) override;
       virtual RtEvent convert_collective_views(
           unsigned requirement_index, unsigned analysis_index,
           LogicalRegion region, const InstanceSet& targets,
@@ -236,8 +234,6 @@ namespace Legion {
       virtual RtEvent perform_collective_versioning_analysis(
           unsigned index, LogicalRegion handle, EqSetTracker* tracker,
           const FieldMask& mask, unsigned parent_req_index) override;
-      virtual bool find_shard_participants(
-          std::vector<ShardID>& shards) override;
     public:
       // Help for unordered detachments
       void record_unordered_kind(
@@ -268,8 +264,6 @@ namespace Legion {
       virtual void trigger_prepipeline_stage(void) override;
       virtual void trigger_dependence_analysis(void) override;
       virtual void trigger_ready(void) override;
-      virtual bool find_shard_participants(
-          std::vector<ShardID>& shards) override;
     public:
       void initialize_replication(ReplicateContext* ctx);
       void record_unordered_kind(

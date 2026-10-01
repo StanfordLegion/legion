@@ -251,9 +251,6 @@ namespace Legion {
       IndexSpace find_shard_space(
           ShardID shard, IndexSpaceNode* full_space, IndexSpace sharding_space,
           Provenance* provenance);
-      bool find_shard_participants(
-          IndexSpaceNode* full_space, IndexSpace sharding_space,
-          std::vector<ShardID>& participants);
       bool has_participants(
           ShardID shard, IndexSpaceNode* full_space, IndexSpace sharding_space);
     public:

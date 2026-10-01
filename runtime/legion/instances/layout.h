@@ -56,10 +56,6 @@ namespace Legion {
       void compute_copy_offsets(
           const FieldMask& copy_mask, const PhysicalInstance instance,
           std::vector<CopySrcDstField>& fields);
-      void compute_copy_offsets(
-          const std::vector<FieldID>& copy_fields,
-          const PhysicalInstance instance,
-          std::vector<CopySrcDstField>& fields);
     public:
       void get_fields(std::set<FieldID>& fields) const;
       bool has_field(FieldID fid) const;
@@ -68,7 +64,6 @@ namespace Legion {
     public:
       const CopySrcDstField& find_field_info(FieldID fid) const;
       size_t get_total_field_size(void) const;
-      void get_fields(std::vector<FieldID>& fields) const;
       void compute_destroyed_fields(
           std::vector<PhysicalInstance::DestroyedField>& serdez_fields) const;
     public:

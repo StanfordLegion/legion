@@ -1875,47 +1875,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ShardingFunction::find_shard_participants(
-        IndexSpaceNode* full_space, IndexSpace shard_space,
-        std::vector<ShardID>& participants)
-    //--------------------------------------------------------------------------
-    {
-      legion_assert(participants.empty());
-      std::pair<IndexSpace, IndexSpace> key(full_space->handle, shard_space);
-      {
-        AutoLock s_lock(sharding_lock, false /*exclusive*/);
-        std::map<std::pair<IndexSpace, IndexSpace>, std::vector<ShardID> >::
-            const_iterator finder = shard_participants.find(key);
-        if (finder != shard_participants.end())
-        {
-          // If the vector is empty that means all the shards are
-          // participants so we didn't need to record them all
-          if (!finder->second.empty())
-          {
-            // Record the specific participating shards
-            participants = finder->second;
-            return false;
-          }
-          else
-            return true;
-        }
-      }
-      std::set<ShardID> range_shards;
-      full_space->compute_range_shards(
-          this, shard_space, manager->shard_points, manager->shard_domain,
-          range_shards);
-      // Should always have at least one shard participant
-      legion_assert(!range_shards.empty());
-      // Only need to record the results if they aren't all participating
-      if (range_shards.size() < manager->total_shards)
-        participants.insert(
-            participants.end(), range_shards.begin(), range_shards.end());
-      AutoLock s_lock(sharding_lock);
-      shard_participants[key] = participants;
-      return participants.empty();
-    }
-
-    //--------------------------------------------------------------------------
     bool ShardingFunction::has_participants(
         ShardID shard, IndexSpaceNode* full_space, IndexSpace shard_space)
     //--------------------------------------------------------------------------

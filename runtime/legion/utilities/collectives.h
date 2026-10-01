@@ -718,7 +718,6 @@ namespace Legion {
           Deserializer& derez, int stage) override;
     public:
       void exchange(bool participating);
-      bool find_shard_participants(std::vector<ShardID>& shards);
     protected:
       std::set<ShardID> participants;
     };

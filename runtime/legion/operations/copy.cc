@@ -406,7 +406,7 @@ namespace Legion {
           Error error(LEGION_INTERFACE_EXCEPTION);
           error << "Invalid 'dst_indirect_is_range' "
                 << "size in launcher. The number of entries "
-                << launcher.src_indirect_is_range.size()
+                << launcher.dst_indirect_is_range.size()
                 << " does not match the number of 'dst_indirect_requirments' "
                 << scatter_size << " for " << *this << ".";
           error.raise();
@@ -457,7 +457,6 @@ namespace Legion {
       }
       else
         arrive_barriers = launcher.arrive_barriers;
-      wait_barriers = launcher.wait_barriers;
       gather_is_range = launcher.src_indirect_is_range;
       scatter_is_range = launcher.dst_indirect_is_range;
       map_id = launcher.map_id;
@@ -3935,13 +3934,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PointCopyOp::find_shard_participants(std::vector<ShardID>& shards)
-    //--------------------------------------------------------------------------
-    {
-      return owner->find_shard_participants(shards);
-    }
-
-    //--------------------------------------------------------------------------
     RtEvent PointCopyOp::exchange_indirect_records(
         const unsigned index, const ApEvent local_pre, const ApEvent local_post,
         ApEvent& collective_pre, ApEvent& collective_post,
@@ -4824,19 +4816,6 @@ namespace Legion {
       else
         return repl_ctx->find_pointwise_dependence(
             context_index, point, point_shard, true /*intra space*/);
-    }
-
-    //--------------------------------------------------------------------------
-    bool ReplIndexCopyOp::find_shard_participants(std::vector<ShardID>& shards)
-    //--------------------------------------------------------------------------
-    {
-      legion_assert(sharding_function != nullptr);
-      if (sharding_space.exists())
-        return sharding_function->find_shard_participants(
-            launch_space, sharding_space, shards);
-      else
-        return sharding_function->find_shard_participants(
-            launch_space, launch_space->handle, shards);
     }
 
     /////////////////////////////////////////////////////////////

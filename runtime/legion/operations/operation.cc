@@ -960,14 +960,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Operation::find_shard_participants(std::vector<ShardID>& shards)
-    //--------------------------------------------------------------------------
-    {
-      // Should only be called in derived types
-      std::abort();
-    }
-
-    //--------------------------------------------------------------------------
     RtEvent Operation::convert_collective_views(
         unsigned requirement_index, unsigned analysis_index,
         LogicalRegion region, const InstanceSet& targets,

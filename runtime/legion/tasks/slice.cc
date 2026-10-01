@@ -1694,14 +1694,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool SliceTask::find_shard_participants(std::vector<ShardID>& shards)
-    //--------------------------------------------------------------------------
-    {
-      legion_assert(!is_remote());
-      return index_owner->find_shard_participants(shards);
-    }
-
-    //--------------------------------------------------------------------------
     RtEvent SliceTask::perform_collective_versioning_analysis(
         unsigned index, LogicalRegion handle, EqSetTracker* tracker,
         const FieldMask& mask, unsigned parent_req_index)

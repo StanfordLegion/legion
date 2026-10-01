@@ -700,13 +700,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PointTask::find_shard_participants(std::vector<ShardID>& shards)
-    //--------------------------------------------------------------------------
-    {
-      return slice_owner->find_shard_participants(shards);
-    }
-
-    //--------------------------------------------------------------------------
     RtEvent PointTask::convert_collective_views(
         unsigned requirement_index, unsigned analysis_index,
         LogicalRegion region, const InstanceSet& targets,

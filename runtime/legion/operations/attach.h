@@ -196,8 +196,6 @@ namespace Legion {
       virtual void trigger_complete(ApEvent effect) override;
       virtual void trigger_commit(void) override;
       virtual size_t get_collective_points(void) const override;
-      virtual bool find_shard_participants(
-          std::vector<ShardID>& shards) override;
       virtual RtEvent convert_collective_views(
           unsigned requirement_index, unsigned analysis_index,
           LogicalRegion region, const InstanceSet& targets,
@@ -350,8 +348,6 @@ namespace Legion {
       virtual RtEvent perform_collective_versioning_analysis(
           unsigned index, LogicalRegion handle, EqSetTracker* tracker,
           const FieldMask& mask, unsigned parent_req_index) override;
-      virtual bool find_shard_participants(
-          std::vector<ShardID>& shards) override;
     protected:
       RtBarrier collective_map_barrier;
       size_t exchange_index;
@@ -392,8 +388,6 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void) override;
       virtual void trigger_ready(void) override;
       virtual bool are_all_direct_children(bool local) override;
-      virtual bool find_shard_participants(
-          std::vector<ShardID>& shards) override;
       virtual void finish_check_point_requirements(
           std::map<unsigned, std::vector<std::pair<DomainPoint, Domain> > >&
               point_domains) override;

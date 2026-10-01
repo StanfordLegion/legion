@@ -1084,13 +1084,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PointFillOp::find_shard_participants(std::vector<ShardID>& shards)
-    //--------------------------------------------------------------------------
-    {
-      return owner->find_shard_participants(shards);
-    }
-
-    //--------------------------------------------------------------------------
     const DomainPoint& PointFillOp::get_domain_point(void) const
     //--------------------------------------------------------------------------
     {
@@ -1464,19 +1457,6 @@ namespace Legion {
         add_launch_space_reference(shard_points);
         IndexFillOp::trigger_replay();
       }
-    }
-
-    //--------------------------------------------------------------------------
-    bool ReplIndexFillOp::find_shard_participants(std::vector<ShardID>& shards)
-    //--------------------------------------------------------------------------
-    {
-      legion_assert(sharding_function != nullptr);
-      if (sharding_space.exists())
-        return sharding_function->find_shard_participants(
-            launch_space, sharding_space, shards);
-      else
-        return sharding_function->find_shard_participants(
-            launch_space, launch_space->handle, shards);
     }
 
     /////////////////////////////////////////////////////////////

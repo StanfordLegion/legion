@@ -749,13 +749,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PointDetachOp::find_shard_participants(std::vector<ShardID>& shards)
-    //--------------------------------------------------------------------------
-    {
-      return owner->find_shard_participants(shards);
-    }
-
-    //--------------------------------------------------------------------------
     RtEvent PointDetachOp::convert_collective_views(
         unsigned requirement_index, unsigned analysis_index,
         LogicalRegion region, const InstanceSet& targets,
@@ -908,14 +901,6 @@ namespace Legion {
         mapping->add_reference();
         first_local = is_first_local_shard;
       }
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    bool ReplDetachOp::find_shard_participants(std::vector<ShardID>& shards)
-    //--------------------------------------------------------------------------
-    {
-      // All shards are participating
       return true;
     }
 
@@ -1096,15 +1081,6 @@ namespace Legion {
       }
       else
         IndexDetachOp::trigger_ready();
-    }
-
-    //--------------------------------------------------------------------------
-    bool ReplIndexDetachOp::find_shard_participants(
-        std::vector<ShardID>& shards)
-    //--------------------------------------------------------------------------
-    {
-      legion_assert(participants != nullptr);
-      return participants->find_shard_participants(shards);
     }
 
     /////////////////////////////////////////////////////////////

@@ -3133,7 +3133,6 @@ namespace Legion {
         delete collective_exchange;
       if (sharding_collective != nullptr)
         delete sharding_collective;
-      unique_intra_space_deps.clear();
       ReplCollectiveViewCreator<IndexTask>::deactivate(false /*free*/);
       if (freeop)
         runtime->free_operation(this);
@@ -4907,19 +4906,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return runtime->get_node(internal_space)->get_volume();
-    }
-
-    //--------------------------------------------------------------------------
-    bool ReplIndexTask::find_shard_participants(std::vector<ShardID>& shards)
-    //--------------------------------------------------------------------------
-    {
-      legion_assert(sharding_function != nullptr);
-      if (sharding_space.exists())
-        return sharding_function->find_shard_participants(
-            launch_space, sharding_space, shards);
-      else
-        return sharding_function->find_shard_participants(
-            launch_space, launch_space->handle, shards);
     }
 
   }  // namespace Internal

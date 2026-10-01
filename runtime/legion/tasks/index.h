@@ -436,8 +436,6 @@ namespace Legion {
       virtual void record_output_registered(RtEvent registered) override;
     public:
       virtual size_t get_collective_points(void) const override;
-      virtual bool find_shard_participants(
-          std::vector<ShardID>& shards) override;
     public:
       void record_output_offset(
           unsigned index, unsigned dim, size_t color_index, size_t offset);
@@ -469,8 +467,6 @@ namespace Legion {
       InterferingPointExchange<ReplIndexTask>* interfering_exchange;
       RtBarrier output_bar;
       std::map<Color, CollectiveID> concurrent_exchange_ids;
-    protected:
-      std::set<std::pair<DomainPoint, ShardID> > unique_intra_space_deps;
     protected:
       // For setting up concurrent execution
       ConcurrentMappingRendezvous* concurrent_mapping_rendezvous;

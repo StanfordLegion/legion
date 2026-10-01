@@ -1530,13 +1530,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PointDepPartOp::find_shard_participants(std::vector<ShardID>& shards)
-    //--------------------------------------------------------------------------
-    {
-      return owner->find_shard_participants(shards);
-    }
-
-    //--------------------------------------------------------------------------
     Partition::PartitionKind PointDepPartOp::get_partition_kind(void) const
     //--------------------------------------------------------------------------
     {
@@ -2242,17 +2235,6 @@ namespace Legion {
       legion_assert(received <= points.size());
       if (received == points.size())
         complete_execution();
-    }
-
-    //--------------------------------------------------------------------------
-    bool ReplDependentPartitionOp::find_shard_participants(
-        std::vector<ShardID>& shards)
-    //--------------------------------------------------------------------------
-    {
-      legion_assert(is_index_space);
-      legion_assert(sharding_function != nullptr);
-      return sharding_function->find_shard_participants(
-          launch_space, launch_space->handle, shards);
     }
 
     //--------------------------------------------------------------------------

@@ -1936,22 +1936,6 @@ namespace Legion {
       perform_collective_async();
     }
 
-    //--------------------------------------------------------------------------
-    bool ShardParticipantsExchange::find_shard_participants(
-        std::vector<ShardID>& shards)
-    //--------------------------------------------------------------------------
-    {
-      legion_assert(shards.empty());
-      perform_collective_wait();
-      if (participants.size() < manager->total_shards)
-      {
-        shards.insert(shards.end(), participants.begin(), participants.end());
-        return false;
-      }
-      else
-        return true;
-    }
-
     /////////////////////////////////////////////////////////////
     // Interfering Point Exchange
     /////////////////////////////////////////////////////////////

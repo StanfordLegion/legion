@@ -464,8 +464,6 @@ namespace Legion {
       }
     public:
       virtual size_t get_collective_points(void) const override;
-      virtual bool find_shard_participants(
-          std::vector<ShardID>& shards) override;
     public:
       // From ProjectionPoint
       virtual const DomainPoint& get_domain_point(void) const override;
@@ -579,8 +577,6 @@ namespace Legion {
       {
         return shard_points;
       }
-      virtual bool find_shard_participants(
-          std::vector<ShardID>& shards) override;
     protected:
       virtual RtEvent exchange_indirect_records(
           const unsigned index, const ApEvent local_pre,

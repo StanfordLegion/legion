@@ -147,8 +147,6 @@ namespace Legion {
       virtual TraceLocalID get_trace_local_id(void) const override;
     public:
       virtual size_t get_collective_points(void) const override;
-      virtual bool find_shard_participants(
-          std::vector<ShardID>& shards) override;
       virtual RtEvent convert_collective_views(
           unsigned requirement_index, unsigned analysis_index,
           LogicalRegion region, const InstanceSet& targets,

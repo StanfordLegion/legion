@@ -286,7 +286,6 @@ namespace Legion {
       virtual size_t get_collective_points(void) const;
       virtual bool perform_collective_analysis(
           CollectiveMapping*& mapping, bool& first_local);
-      virtual bool find_shard_participants(std::vector<ShardID>& shards);
       virtual RtEvent convert_collective_views(
           unsigned requirement_index, unsigned analysis_index,
           LogicalRegion region, const InstanceSet& targets,

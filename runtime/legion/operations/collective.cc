@@ -442,9 +442,9 @@ namespace Legion {
             break;
         }
         legion_assert(local_analyses > 0);
+        bool first = true;
         while (result_it->first == runtime->address_space)
         {
-          bool first = true;
           if (result_it->second->finalize_rendezvous(
                   mapping, views, counts, first, local_analyses))
             delete result_it->second;

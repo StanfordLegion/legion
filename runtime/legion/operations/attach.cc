@@ -1121,13 +1121,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PointAttachOp::find_shard_participants(std::vector<ShardID>& shards)
-    //--------------------------------------------------------------------------
-    {
-      return owner->find_shard_participants(shards);
-    }
-
-    //--------------------------------------------------------------------------
     RtEvent PointAttachOp::convert_collective_views(
         unsigned requirement_index, unsigned analysis_index,
         LogicalRegion region, const InstanceSet& targets,
@@ -1621,14 +1614,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ReplAttachOp::find_shard_participants(std::vector<ShardID>& shards)
-    //--------------------------------------------------------------------------
-    {
-      // All shards are participating
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
     PhysicalManager* ReplAttachOp::create_manager(
         RegionNode* node, const std::vector<FieldID>& field_set,
         const std::vector<size_t>& field_sizes,
@@ -1949,15 +1934,6 @@ namespace Legion {
           repl_ctx, repl_ctx->get_next_collective_index(
                         COLLECTIVE_LOC_27, true /*logical*/));
       return all_direct_children.sync_all_reduce(local);
-    }
-
-    //--------------------------------------------------------------------------
-    bool ReplIndexAttachOp::find_shard_participants(
-        std::vector<ShardID>& shards)
-    //--------------------------------------------------------------------------
-    {
-      legion_assert(participants != nullptr);
-      return participants->find_shard_participants(shards);
     }
 
     /////////////////////////////////////////////////////////////

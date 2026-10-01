@@ -151,27 +151,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LayoutDescription::compute_copy_offsets(
-        const std::vector<FieldID>& copy_fields,
-        const PhysicalInstance instance, std::vector<CopySrcDstField>& fields)
-    //--------------------------------------------------------------------------
-    {
-      unsigned offset = fields.size();
-      fields.resize(offset + copy_fields.size());
-      for (unsigned idx = 0; idx < copy_fields.size(); idx++)
-      {
-        std::map<FieldID, unsigned>::const_iterator finder =
-            field_indexes.find(copy_fields[idx]);
-        legion_assert(finder != field_indexes.end());
-        CopySrcDstField& info = fields[offset + idx];
-        info = field_infos[finder->second];
-        // Since instances are annonymous in layout descriptions we
-        // have to fill them in when we add the field info
-        info.inst = instance;
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void LayoutDescription::get_fields(std::set<FieldID>& fields) const
     //--------------------------------------------------------------------------
     {
@@ -233,13 +212,6 @@ namespace Legion {
       // Add up all the field sizes
       for (const CopySrcDstField& it : field_infos) result += it.size;
       return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void LayoutDescription::get_fields(std::vector<FieldID>& fields) const
-    //--------------------------------------------------------------------------
-    {
-      fields = constraints->field_constraint.get_field_set();
     }
 
     //--------------------------------------------------------------------------
