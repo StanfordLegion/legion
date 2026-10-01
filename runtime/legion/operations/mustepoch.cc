@@ -272,7 +272,7 @@ namespace Legion {
       input.constraints.clear();
       output.task_processors.clear();
       output.constraint_mappings.clear();
-      slice_version_events.clear();
+      internal_dependences.clear();
       commit_preconditions.clear();
       Operation::deactivate(false /*free*/);
       // Return this operation to the free list
@@ -1219,28 +1219,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtUserEvent MustEpochOp::find_slice_versioning_event(
-        UniqueID slice_id, bool& first)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      std::map<UniqueID, RtUserEvent>::const_iterator finder =
-          slice_version_events.find(slice_id);
-      if (finder == slice_version_events.end())
-      {
-        first = true;
-        RtUserEvent result = Runtime::create_rt_user_event();
-        slice_version_events[slice_id] = result;
-        return result;
-      }
-      else
-      {
-        first = false;
-        return finder->second;
-      }
-    }
-
-    //--------------------------------------------------------------------------
     int MustEpochOp::find_operation_index(Operation* op, GenerationID op_gen)
     //--------------------------------------------------------------------------
     {
@@ -1786,7 +1764,7 @@ namespace Legion {
         local_mapped_events.emplace_back(remote_mapped);
       ApEvent remote_complete;
       derez.deserialize(remote_complete);
-      if (!remote_complete.exists())
+      if (remote_complete.exists())
         local_complete_events.emplace_back(remote_complete);
     }
 

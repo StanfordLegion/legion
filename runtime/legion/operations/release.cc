@@ -684,7 +684,6 @@ namespace Legion {
       // and the second case where we need to wait for the analysis to
       // tell us the names of the instances which are restricted
       const RegionUsage usage(req);
-      std::vector<ApEvent> released_events;
       if (!known_targets)
       {
         if (remote_ready.exists() && !remote_ready.has_triggered())

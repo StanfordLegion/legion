@@ -174,7 +174,7 @@ namespace Legion {
       // Now that we've got the output instances we copy the result to
       // each of the targets, we're done when the copies are done
       // create an external instance for the current allocation
-      FutureInstance* serdez_redop_instance = new FutureInstance(
+      serdez_redop_instance = new FutureInstance(
           serdez_redop_buffer, future_result_size, true /*external*/,
           false /*own allocation*/);
       std::vector<ApEvent> done_events;

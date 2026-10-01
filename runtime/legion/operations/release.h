@@ -144,7 +144,6 @@ namespace Legion {
         size_t buffer_size;
       };
       std::vector<ProfilingMeasurementID> profiling_requests;
-      std::vector<ReleaseProfilingInfo> profiling_info;
       RtUserEvent profiling_reported;
       int profiling_priority;
       int copy_fill_priority;

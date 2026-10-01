@@ -152,7 +152,6 @@ namespace Legion {
       void notify_subop_complete(Operation* op, ApEvent effect);
       void notify_subop_commit(Operation* op, RtEvent precondition);
     public:
-      RtUserEvent find_slice_versioning_event(UniqueID slice_id, bool& first);
       int find_operation_index(Operation* op, GenerationID generation);
       TaskOp* find_task_by_index(int index);
     protected:
@@ -172,7 +171,6 @@ namespace Legion {
       // The component slices for distribution
       std::set<SliceTask*> slice_tasks;
       // The actual base operations
-      // Use a deque to keep everything in order
       std::vector<SingleTask*> single_tasks;
       std::atomic<unsigned> remaining_single_tasks;
       RtUserEvent single_tasks_ready;
@@ -220,8 +218,6 @@ namespace Legion {
       std::map<SingleTask*, unsigned /*single task index*/> single_task_map;
       std::vector<std::set<unsigned /*single task index*/> >
           mapping_dependences;
-    protected:
-      std::map<UniqueID, RtUserEvent> slice_version_events;
     protected:
       std::set<RtEvent> commit_preconditions;
     };

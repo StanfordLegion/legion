@@ -263,8 +263,6 @@ namespace Legion {
     protected:
       mutable LocalLock sharding_lock;
       std::map<ShardKey, IndexSpace /*result*/> shard_index_spaces;
-      std::map<std::pair<IndexSpace, IndexSpace>, std::vector<ShardID> >
-          shard_participants;
     };
 
     /**
