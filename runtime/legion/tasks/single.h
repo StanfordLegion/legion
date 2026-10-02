@@ -79,14 +79,6 @@ namespace Legion {
       void update_no_access_regions(void);
       void clone_single_from(SingleTask* task);
     public:
-      inline void clone_virtual_mapped(std::vector<bool>& target) const
-      {
-        target = virtual_mapped;
-      }
-      inline void clone_parent_req_indexes(std::vector<unsigned>& target) const
-      {
-        target = parent_req_indexes;
-      }
       inline const std::deque<InstanceSet>& get_physical_instances(void) const
       {
         return physical_instances;

@@ -139,20 +139,15 @@ namespace Legion {
         static constexpr LgTaskID TASK_ID = LG_DEFER_PERFORM_MAPPING_TASK_ID;
       public:
         DeferMappingArgs(void) = default;
-        DeferMappingArgs(
-            TaskOp* op, MustEpochOp* owner, unsigned cnt,
-            std::vector<unsigned>* performed, std::vector<ApEvent>* eff)
+        DeferMappingArgs(TaskOp* op, MustEpochOp* owner, unsigned cnt)
           : LgTaskArgs<DeferMappingArgs>(false, false), proxy_this(op),
-            must_op(owner), invocation_count(cnt), performed_regions(performed),
-            effects(eff)
+            must_op(owner), invocation_count(cnt)
         { }
         void execute(void) const;
       public:
         TaskOp* proxy_this;
         MustEpochOp* must_op;
         unsigned invocation_count;
-        std::vector<unsigned>* performed_regions;
-        std::vector<ApEvent>* effects;
       };
       struct FinalizeOutputEqKDTreeArgs
         : public LgTaskArgs<FinalizeOutputEqKDTreeArgs> {
@@ -285,9 +280,7 @@ namespace Legion {
           const std::deque<InstanceSet>& parent_regions) = 0;
     public:
       bool defer_perform_mapping(
-          RtEvent precondition, MustEpochOp* op, unsigned invocation_count = 0,
-          std::vector<unsigned>* performed = nullptr,
-          std::vector<ApEvent>* effects = nullptr);
+          RtEvent precondition, MustEpochOp* op, unsigned invocation_count = 0);
     public:
       // Tell the parent context that this task is in a ready queue
       void activate_outstanding_task(void);

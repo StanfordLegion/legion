@@ -137,12 +137,6 @@ namespace Legion {
     protected:
       MapperManager* mapper;
     protected:
-      struct ReleaseProfilingInfo
-        : public Mapping::Mapper::ReleaseProfilingInfo {
-      public:
-        void* buffer;
-        size_t buffer_size;
-      };
       std::vector<ProfilingMeasurementID> profiling_requests;
       RtUserEvent profiling_reported;
       int profiling_priority;

@@ -90,7 +90,6 @@ namespace Legion {
       commit_preconditions.clear();
       version_infos.clear();
       interfering_requirements.clear();
-      point_requirements.clear();
       output_region_states.clear();
       output_pointwise_dependences.clear();
       legion_assert(pending_pointwise_dependences.empty());
@@ -1458,7 +1457,9 @@ namespace Legion {
           serdez_redop_state = malloc(serdez_redop_state_size);
           memcpy(serdez_redop_state, value, serdez_redop_state_size);
         }
-        serdez_redop_targets.swap(target_mems);
+        // Copy rather than swap so the caller's vector keeps the mapper's
+        // normalized output, which trace recording reads after this call
+        serdez_redop_targets = target_mems;
       }
     }
 
@@ -3112,7 +3113,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       for (std::pair<const Color, ConcurrentGroup>& group : concurrent_groups)
-        if (group.second.exchange == nullptr)
+        if (group.second.exchange != nullptr)
           delete group.second.exchange;
       if (serdez_redop_collective != nullptr)
         delete serdez_redop_collective;

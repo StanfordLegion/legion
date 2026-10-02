@@ -239,7 +239,6 @@ namespace Legion {
       std::vector<std::map<DomainPoint, RtEvent> > output_pointwise_dependences;
       std::vector<OutputRegionState> output_region_states;
     protected:
-      std::vector<ProfilingMeasurementID> task_profiling_requests;
       std::vector<ProfilingMeasurementID> copy_profiling_requests;
       RtUserEvent profiling_reported;
       int profiling_priority;
@@ -249,7 +248,6 @@ namespace Legion {
     protected:
       // For checking aliasing of points in debug mode only
       std::set<std::pair<unsigned, unsigned> > interfering_requirements;
-      std::map<DomainPoint, std::vector<LogicalRegion> > point_requirements;
     };
 
     /**

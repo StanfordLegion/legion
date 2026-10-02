@@ -969,11 +969,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool TaskOp::defer_perform_mapping(
-        RtEvent precondition, MustEpochOp* op, unsigned invocation_count,
-        std::vector<unsigned>* performed, std::vector<ApEvent>* effects)
+        RtEvent precondition, MustEpochOp* op, unsigned invocation_count)
     //--------------------------------------------------------------------------
     {
-      DeferMappingArgs args(this, op, invocation_count, performed, effects);
+      DeferMappingArgs args(this, op, invocation_count);
       runtime->issue_runtime_meta_task(
           args, LG_THROUGHPUT_DEFERRED_PRIORITY, precondition);
       return false;
