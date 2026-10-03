@@ -856,6 +856,11 @@ if ("${Legion_NETWORKS}" MATCHES .*gasnetex.*)
 else()
   set(REALM_ENABLE_GASNETEX OFF)
 endif()
+if (Legion_USE_MPI OR "${Legion_NETWORKS}" MATCHES .*mpi.*)
+  set(REALM_ENABLE_MPI ON)
+else()
+  set(REALM_ENABLE_MPI OFF)
+endif()
 if (GASNet_INSTALL_DIR)
   set(GASNet_ROOT ${GASNet_INSTALL_DIR})
 endif()
@@ -880,7 +885,7 @@ CPMFindPackage(NAME Realm
                "REALM_ENABLE_HIP ${Legion_USE_HIP}"
                "REALM_ENABLE_LLVM ${Legion_USE_LLVM}"
                "REALM_ENABLE_HDF5 ${Legion_USE_HDF5}"
-               "REALM_ENABLE_MPI ${Legion_USE_MPI}"
+               "REALM_ENABLE_MPI ${REALM_ENABLE_MPI}"
                "REALM_ENABLE_OPENMP ${Legion_USE_OpenMP}"
                "REALM_OPENMP_SYSTEM_RUNTIME ${Legion_OpenMP_SYSTEM_RUNTIME}"
                "REALM_OPENMP_GOMP_SUPPORT ${Legion_OpenMP_GOMP_SUPPORT}"
