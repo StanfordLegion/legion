@@ -2393,8 +2393,6 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      ValidDistributedCollectable* remote;
-      derez.deserialize(remote);
       AddressSpaceID source;
       derez.deserialize(source);
       int count;
