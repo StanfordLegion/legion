@@ -1,6 +1,11 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
+Version 26.09.1 (October 4, 2026)
+ * Legion
+    - Fixes a regression from the previous release
+    - Fixes building Realm with MPI when `Legion_NETWORKS=mpi` is enabled
+
 Version 26.09.0 (September 30, 2026)
  * Legion
     - Work was done this quarter to formalize several important
