@@ -1,3 +1,5 @@
+![License](https://img.shields.io/github/license/StanfordLegion/legion.svg)
+
 # Legion 
 
 
